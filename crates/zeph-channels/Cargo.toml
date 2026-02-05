@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-teloxide = { workspace = true, features = ["macros"] }
+teloxide.workspace = true
 tokio = { workspace = true, features = ["sync", "rt"] }
 tracing.workspace = true
 zeph-core = { path = "../zeph-core" }
