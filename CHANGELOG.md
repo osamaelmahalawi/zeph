@@ -58,8 +58,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Graceful shutdown via tokio::sync::watch + tokio::signal (SIGINT/SIGTERM)
 - Ollama startup health check (warn-only, non-blocking)
 - README with installation, configuration, usage, and skills documentation
+- GitHub Actions CI/CD: lint, clippy, test (ubuntu + macos), coverage, security, release
+- Dependabot for Cargo and GitHub Actions with auto-merge for patch/minor updates
+- Auto-labeler workflow for PRs by path, title prefix, and size
+- Release workflow with cross-platform binary builds and checksums
+- Issue templates (bug report, feature request)
+- PR template with review checklist
+- LICENSE (MIT), CONTRIBUTING.md, SECURITY.md
+
+### Fixed
+- Replace vulnerable `serde_yml`/`libyml` with manual frontmatter parser (GHSA high + medium)
 
 ### Changed
+- Move dependency features from workspace root to individual crate manifests
+- Update README with badges, architecture overview, and pre-built binaries section
 
 - Agent is now generic over both LlmProvider and Channel (`Agent<P, C>`)
 - Agent::new() accepts a Channel parameter instead of reading stdin directly
