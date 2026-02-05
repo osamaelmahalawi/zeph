@@ -109,6 +109,30 @@ Use curl to fetch search results...
 
 All loaded skills are injected into the system prompt.
 
+## Docker
+
+### Apple Silicon (Ollama on host with Metal GPU)
+
+```bash
+ollama serve &
+ZEPH_LLM_BASE_URL=http://host.docker.internal:11434 docker compose up
+```
+
+### Ollama in container (CPU)
+
+```bash
+docker compose --profile cpu up
+```
+
+### Linux with NVIDIA GPU
+
+```bash
+docker compose --profile gpu -f docker-compose.yml -f docker-compose.gpu.yml up
+```
+
+> [!TIP]
+> Add `--build` to rebuild the image after code changes. Pass `ZEPH_TELEGRAM_TOKEN=xxx` to enable Telegram mode.
+
 ## Architecture
 
 ```
@@ -121,7 +145,7 @@ zeph (binary)
 ```
 
 > [!IMPORTANT]
-> Requires Rust Edition 2024 (1.85+). Native async traits are used throughout — no `async-trait` crate.
+> Requires Rust 1.88+ (Edition 2024). Native async traits are used throughout — no `async-trait` crate.
 
 ## License
 
