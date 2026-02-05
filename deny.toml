@@ -26,6 +26,7 @@ allow = [
     "CC0-1.0",
     "Unlicense",
     "OpenSSL",
+    "CDLA-Permissive-2.0",
 ]
 
 [[licenses.clarify]]
