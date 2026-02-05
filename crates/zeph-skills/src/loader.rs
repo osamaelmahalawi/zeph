@@ -1,19 +1,12 @@
 use std::path::Path;
 
 use anyhow::{Context, bail};
-use serde::Deserialize;
 
 #[derive(Debug)]
 pub struct Skill {
     pub name: String,
     pub description: String,
     pub body: String,
-}
-
-#[derive(Deserialize)]
-struct Frontmatter {
-    name: String,
-    description: String,
 }
 
 /// Load a skill from a SKILL.md file with YAML frontmatter.
@@ -36,14 +29,34 @@ pub fn load_skill(path: &Path) -> anyhow::Result<Skill> {
     };
 
     let yaml_str = &after_open[..close];
-    let fm: Frontmatter = serde_yml::from_str(yaml_str)
-        .with_context(|| format!("invalid frontmatter in {}", path.display()))?;
+    let (mut name, mut description) = (None, None);
+    for line in yaml_str.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once(':') {
+            let value = value.trim().to_string();
+            match key.trim() {
+                "name" => name = Some(value),
+                "description" => description = Some(value),
+                _ => {}
+            }
+        }
+    }
+
+    let name = name
+        .filter(|s| !s.is_empty())
+        .with_context(|| format!("missing 'name' in frontmatter of {}", path.display()))?;
+    let description = description
+        .filter(|s| !s.is_empty())
+        .with_context(|| format!("missing 'description' in frontmatter of {}", path.display()))?;
 
     let body = after_open[close + 3..].trim().to_string();
 
     Ok(Skill {
-        name: fm.name,
-        description: fm.description,
+        name,
+        description,
         body,
     })
 }
