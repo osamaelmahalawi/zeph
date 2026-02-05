@@ -1,29 +1,56 @@
 # Zeph
 
-Lightweight AI agent in Rust with hybrid inference (Ollama / Claude), CLI and Telegram interfaces, and a skills-first architecture.
+[![CI](https://img.shields.io/github/actions/workflow/status/bug-ops/zeph/ci.yml?branch=main)](https://github.com/bug-ops/zeph/actions)
+[![codecov](https://codecov.io/gh/bug-ops/zeph/graph/badge.svg?token=S5O0GR9U6G)](https://codecov.io/gh/bug-ops/zeph)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-## Features
-
-- **Hybrid LLM inference** -- local Ollama or cloud Claude via Anthropic API
-- **CLI and Telegram** -- interactive terminal by default, Telegram bot when token is set
-- **Skills system** -- drop `SKILL.md` files into `skills/` to extend agent capabilities
-- **Shell execution** -- agent extracts bash blocks from LLM responses and runs them
-- **SQLite memory** -- conversation persistence with configurable history limit
-- **Graceful shutdown** -- handles SIGINT/SIGTERM cleanly
+Lightweight AI agent with hybrid inference (Ollama / Claude), skills-first architecture, and multi-channel I/O.
 
 ## Installation
 
+### From source
+
 ```bash
+git clone https://github.com/bug-ops/zeph
+cd zeph
 cargo build --release
 ```
 
 The binary is produced at `target/release/zeph`.
 
+### Pre-built binaries
+
+Download from [GitHub Releases](https://github.com/bug-ops/zeph/releases/latest):
+
+| Platform | Architecture | Download |
+|----------|-------------|----------|
+| Linux | x86_64 | `zeph-x86_64-unknown-linux-gnu.tar.gz` |
+| Linux | aarch64 | `zeph-aarch64-unknown-linux-gnu.tar.gz` |
+| macOS | x86_64 | `zeph-x86_64-apple-darwin.tar.gz` |
+| macOS | aarch64 | `zeph-aarch64-apple-darwin.tar.gz` |
+
+## Usage
+
+### CLI mode (default)
+
+```bash
+./target/release/zeph
+```
+
+Type messages at the `You:` prompt. Type `exit`, `quit`, or press Ctrl-D to stop.
+
+### Telegram mode
+
+```bash
+ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
+```
+
+> [!TIP]
+> Restrict access by setting `telegram.allowed_users` in the config file.
+
 ## Configuration
 
 Zeph loads `config/default.toml` at startup and applies environment variable overrides.
-
-### Config file
 
 ```toml
 [agent]
@@ -57,29 +84,9 @@ history_limit = 50
 | `ZEPH_TELEGRAM_TOKEN` | Telegram bot token (enables Telegram mode) |
 | `ZEPH_SQLITE_PATH` | SQLite database path |
 
-## Usage
-
-### CLI mode (default)
-
-```bash
-./target/release/zeph
-```
-
-Type messages at the `You:` prompt. Type `exit`, `quit`, or press Ctrl-D to stop.
-
-### Telegram mode
-
-Set `ZEPH_TELEGRAM_TOKEN` to your bot token:
-
-```bash
-ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
-```
-
-Optionally restrict access via `telegram.allowed_users` in config.
-
 ## Skills
 
-Create a directory under `skills/` with a `SKILL.md` file containing YAML frontmatter:
+Drop `SKILL.md` files into subdirectories under `skills/` to extend agent capabilities:
 
 ```
 skills/
@@ -101,6 +108,20 @@ Use curl to fetch search results...
 ```
 
 All loaded skills are injected into the system prompt.
+
+## Architecture
+
+```
+zeph (binary)
+├── zeph-core       Agent loop, config, channel trait
+├── zeph-llm        LlmProvider trait, Ollama + Claude backends
+├── zeph-skills     SKILL.md parser, registry, prompt formatter
+├── zeph-memory     SQLite conversation persistence
+└── zeph-channels   Telegram adapter (teloxide)
+```
+
+> [!IMPORTANT]
+> Requires Rust Edition 2024 (1.85+). Native async traits are used throughout — no `async-trait` crate.
 
 ## License
 
