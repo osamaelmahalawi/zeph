@@ -23,13 +23,9 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
-      - uses: moonrepo/setup-rust@v1
+      - uses: dtolnay/rust-toolchain@nightly
         with:
-          channel: nightly
           components: rustfmt
-          cache: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Check formatting
         run: cargo +nightly fmt --check
 
@@ -39,12 +35,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - uses: moonrepo/setup-rust@v1
+      - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-          cache-target: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "false"
       - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Clippy
         run: cargo clippy --workspace --all-features -- -D warnings
@@ -63,13 +59,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
-      - uses: moonrepo/setup-rust@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          bins: cargo-nextest
-          cache-target: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          cache-targets: "false"
       - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: taiki-e/install-action@nextest
       - name: Run tests
         run: cargo nextest run --workspace --lib --bins
         env:
@@ -83,13 +78,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - uses: moonrepo/setup-rust@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          bins: cargo-nextest
-          cache-target: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          cache-targets: "false"
       - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: taiki-e/install-action@nextest
       - name: Run integration tests (testcontainers)
         run: cargo nextest run --workspace --profile ci --test '*integration*'
         env:
@@ -103,13 +97,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
-      - uses: moonrepo/setup-rust@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
-          bins: cargo-llvm-cov
-          cache-target: release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          cache-targets: "false"
       - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: taiki-e/install-action@cargo-llvm-cov
       - name: Generate coverage
         run: cargo llvm-cov --workspace --lcov --output-path lcov.info
         env:
