@@ -1,9 +1,11 @@
 use std::time::{Duration, Instant};
 
 use teloxide::prelude::*;
-use teloxide::types::{ChatAction, MessageId};
+use teloxide::types::{ChatAction, MessageId, ParseMode};
 use tokio::sync::mpsc;
 use zeph_core::channel::{Channel, ChannelMessage};
+
+use crate::markdown::markdown_to_telegram;
 
 const MAX_MESSAGE_LEN: usize = 4096;
 
@@ -108,10 +110,34 @@ impl TelegramChannel {
         }
     }
 
+    fn has_unclosed_code_block(text: &str) -> bool {
+        // Check code blocks (```)
+        if !text.matches("```").count().is_multiple_of(2) {
+            return true;
+        }
+
+        // Check bold markers (*)
+        // Count non-escaped * by looking at characters that come after \
+        let mut unescaped_asterisks: usize = 0;
+        let mut chars = text.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                // Skip next character (it's escaped)
+                chars.next();
+            } else if c == '*' {
+                unescaped_asterisks += 1;
+            }
+        }
+
+        // Odd number of unescaped * means unclosed bold
+        !unescaped_asterisks.is_multiple_of(2)
+    }
+
     fn should_send_update(&self) -> bool {
         match self.last_edit {
             None => true,
-            Some(last) => last.elapsed() > Duration::from_secs(1) || self.accumulated.len() >= 512,
+            Some(last) => last.elapsed() > Duration::from_secs(10),
         }
     }
 
@@ -126,19 +152,47 @@ impl TelegramChannel {
             &self.accumulated
         };
 
+        // Don't send if there's an unclosed code block
+        if Self::has_unclosed_code_block(text) {
+            tracing::debug!("skipping update: unclosed code block detected");
+            return Ok(());
+        }
+
+        // Convert markdown to Telegram format
+        let formatted_text = markdown_to_telegram(text);
+
+        tracing::debug!("formatted_text (full): {}", formatted_text);
+
         match self.message_id {
             None => {
-                let msg = self.bot.send_message(chat_id, text).await?;
+                tracing::debug!("sending new message (length: {})", formatted_text.len());
+                let msg = self
+                    .bot
+                    .send_message(chat_id, formatted_text)
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
                 self.message_id = Some(msg.id);
+                tracing::debug!("new message sent with id: {:?}", msg.id);
             }
             Some(msg_id) => {
-                let edit_result = self.bot.edit_message_text(chat_id, msg_id, text).await;
+                tracing::debug!(
+                    "editing message {:?} (length: {})",
+                    msg_id,
+                    formatted_text.len()
+                );
+                let edit_result = self
+                    .bot
+                    .edit_message_text(chat_id, msg_id, &formatted_text)
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await;
 
                 if let Err(e) = edit_result {
                     let error_msg = e.to_string();
 
-                    if error_msg.contains("message is not modified")
-                        || error_msg.contains("message to edit not found")
+                    if error_msg.contains("message is not modified") {
+                        // Text hasn't changed, just skip this update
+                        tracing::debug!("message content unchanged, skipping edit");
+                    } else if error_msg.contains("message to edit not found")
                         || error_msg.contains("MESSAGE_ID_INVALID")
                     {
                         tracing::warn!(
@@ -147,11 +201,17 @@ impl TelegramChannel {
                         self.message_id = None;
                         self.last_edit = None;
 
-                        let msg = self.bot.send_message(chat_id, text).await?;
+                        let msg = self
+                            .bot
+                            .send_message(chat_id, &formatted_text)
+                            .parse_mode(ParseMode::MarkdownV2)
+                            .await?;
                         self.message_id = Some(msg.id);
                     } else {
                         return Err(e.into());
                     }
+                } else {
+                    tracing::debug!("message edited successfully");
                 }
             }
         }
@@ -207,12 +267,21 @@ impl Channel for TelegramChannel {
             anyhow::bail!("no active chat to send message to");
         };
 
-        if text.len() <= MAX_MESSAGE_LEN {
-            self.bot.send_message(chat_id, text).await?;
+        // Convert markdown to Telegram format
+        let formatted_text = markdown_to_telegram(text);
+
+        if formatted_text.len() <= MAX_MESSAGE_LEN {
+            self.bot
+                .send_message(chat_id, &formatted_text)
+                .parse_mode(ParseMode::MarkdownV2)
+                .await?;
         } else {
-            for chunk in text.as_bytes().chunks(MAX_MESSAGE_LEN) {
+            for chunk in formatted_text.as_bytes().chunks(MAX_MESSAGE_LEN) {
                 let chunk_str = String::from_utf8_lossy(chunk);
-                self.bot.send_message(chat_id, chunk_str.as_ref()).await?;
+                self.bot
+                    .send_message(chat_id, chunk_str.as_ref())
+                    .parse_mode(ParseMode::MarkdownV2)
+                    .await?;
             }
         }
 
@@ -221,8 +290,14 @@ impl Channel for TelegramChannel {
 
     async fn send_chunk(&mut self, chunk: &str) -> anyhow::Result<()> {
         self.accumulated.push_str(chunk);
+        tracing::debug!(
+            "received chunk (size: {}, total: {})",
+            chunk.len(),
+            self.accumulated.len()
+        );
 
         if self.should_send_update() {
+            tracing::debug!("sending update (should_send_update returned true)");
             self.send_or_edit().await?;
         }
 
@@ -230,6 +305,12 @@ impl Channel for TelegramChannel {
     }
 
     async fn flush_chunks(&mut self) -> anyhow::Result<()> {
+        tracing::debug!(
+            "flushing chunks (message_id: {:?}, accumulated: {} bytes)",
+            self.message_id,
+            self.accumulated.len()
+        );
+
         // Final update with complete message
         if self.message_id.is_some() {
             self.send_or_edit().await?;
@@ -275,12 +356,13 @@ mod tests {
     }
 
     #[test]
-    fn should_send_update_size_threshold() {
+    fn should_send_update_time_threshold() {
         let token = "test_token".to_string();
         let allowed_users = Vec::new();
         let mut channel = TelegramChannel::new(token, allowed_users);
-        channel.accumulated = "a".repeat(512);
-        channel.last_edit = Some(Instant::now());
+        channel.accumulated = "test".to_string();
+        // Set last_edit to 11 seconds ago (threshold is 10 seconds)
+        channel.last_edit = Some(Instant::now() - Duration::from_secs(11));
         assert!(channel.should_send_update());
     }
 

@@ -67,12 +67,22 @@ impl<P: LlmProvider, C: Channel, T: ToolExecutor> Agent<P, C, T> {
 
         let history = store.load_history(cid, self.history_limit).await?;
         if !history.is_empty() {
-            tracing::info!(
-                "restored {} message(s) from conversation {cid}",
-                history.len()
-            );
+            let mut loaded = 0;
+            let mut skipped = 0;
+
             for msg in history {
+                if msg.content.trim().is_empty() {
+                    tracing::warn!("skipping empty message from history (role: {:?})", msg.role);
+                    skipped += 1;
+                    continue;
+                }
                 self.messages.push(msg);
+                loaded += 1;
+            }
+
+            tracing::info!("restored {loaded} message(s) from conversation {cid}");
+            if skipped > 0 {
+                tracing::warn!("skipped {skipped} empty message(s) from history");
             }
         }
         Ok(())
@@ -127,6 +137,14 @@ impl<P: LlmProvider, C: Channel, T: ToolExecutor> Agent<P, C, T> {
                 resp
             };
 
+            if response.trim().is_empty() {
+                tracing::warn!("received empty response from LLM, skipping");
+                self.channel
+                    .send("Received an empty response. Please try again.")
+                    .await?;
+                return Ok(());
+            }
+
             self.messages.push(Message {
                 role: Role::Assistant,
                 content: response.clone(),
@@ -135,7 +153,12 @@ impl<P: LlmProvider, C: Channel, T: ToolExecutor> Agent<P, C, T> {
 
             match self.tool_executor.execute(&response).await {
                 Ok(Some(output)) => {
-                    let formatted_output = format!("[shell output]\n{output}");
+                    if output.summary.trim().is_empty() {
+                        tracing::warn!("tool execution returned empty output");
+                        return Ok(());
+                    }
+
+                    let formatted_output = format!("[shell output]\n```\n{output}\n```");
                     self.channel.send(&formatted_output).await?;
 
                     self.messages.push(Message {
