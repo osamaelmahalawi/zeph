@@ -52,6 +52,14 @@ ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
 
 Zeph loads `config/default.toml` at startup and applies environment variable overrides.
 
+> [!NOTE]
+> When using Ollama, ensure both the LLM model and embedding model are pulled:
+> ```bash
+> ollama pull mistral:7b
+> ollama pull qwen3-embedding
+> ```
+> The default configuration uses `mistral:7b` for text generation and `qwen3-embedding` for vector embeddings. These models are independent and work together seamlessly.
+
 ```toml
 [agent]
 name = "Zeph"
@@ -60,6 +68,7 @@ name = "Zeph"
 provider = "ollama"
 base_url = "http://localhost:11434"
 model = "mistral:7b"
+embedding_model = "qwen3-embedding"  # Model for text embeddings
 
 [llm.cloud]
 model = "claude-sonnet-4-5-20250929"
@@ -87,6 +96,7 @@ blocked_commands = []  # Additional patterns beyond defaults
 | `ZEPH_LLM_PROVIDER` | `ollama` or `claude` |
 | `ZEPH_LLM_BASE_URL` | Ollama API endpoint |
 | `ZEPH_LLM_MODEL` | Model name for Ollama |
+| `ZEPH_LLM_EMBEDDING_MODEL` | Embedding model for Ollama (default: `qwen3-embedding`) |
 | `ZEPH_CLAUDE_API_KEY` | Anthropic API key (required for Claude) |
 | `ZEPH_TELEGRAM_TOKEN` | Telegram bot token (enables Telegram mode) |
 | `ZEPH_SQLITE_PATH` | SQLite database path |
@@ -125,6 +135,8 @@ All loaded skills are injected into the system prompt.
 ### Apple Silicon (Ollama on host with Metal GPU)
 
 ```bash
+ollama pull mistral:7b
+ollama pull qwen3-embedding
 ollama serve &
 ZEPH_LLM_BASE_URL=http://host.docker.internal:11434 docker compose up
 ```
