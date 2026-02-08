@@ -1,14 +1,6 @@
-FROM rust:1.88-slim-bookworm AS builder
-
-WORKDIR /build
-
-COPY Cargo.toml Cargo.lock ./
-COPY src/ src/
-COPY crates/ crates/
-
-RUN cargo build --release && strip target/release/zeph
-
 FROM container-registry.oracle.com/os/oraclelinux:9-slim
+
+ARG TARGETARCH
 
 RUN microdnf install -y shadow-utils ca-certificates && \
     microdnf clean all && \
@@ -16,11 +8,12 @@ RUN microdnf install -y shadow-utils ca-certificates && \
 
 WORKDIR /app
 
-COPY --from=builder /build/target/release/zeph /app/zeph
+COPY binaries/zeph-${TARGETARCH} /app/zeph
 COPY config/ /app/config/
 COPY skills/ /app/skills/
 
-RUN chown -R zeph:zeph /app
+RUN chown -R zeph:zeph /app && \
+    chmod +x /app/zeph
 
 USER zeph
 
