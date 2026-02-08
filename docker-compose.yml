@@ -33,10 +33,12 @@ services:
         condition: service_started
         required: false
     environment:
-      ZEPH_LLM_PROVIDER: ollama
+      ZEPH_LLM_PROVIDER: ${ZEPH_LLM_PROVIDER:-ollama}
       ZEPH_LLM_BASE_URL: ${ZEPH_LLM_BASE_URL:-http://ollama:11434}
       ZEPH_LLM_MODEL: ${ZEPH_LLM_MODEL:-mistral:7b}
       ZEPH_LLM_EMBEDDING_MODEL: ${ZEPH_LLM_EMBEDDING_MODEL:-qwen3-embedding}
+      ZEPH_CLAUDE_API_KEY: ${ZEPH_CLAUDE_API_KEY:-}
+      ZEPH_TELEGRAM_TOKEN: ${ZEPH_TELEGRAM_TOKEN:-}
       ZEPH_SQLITE_PATH: /app/data/zeph.db
       ZEPH_QDRANT_URL: http://qdrant:6334
     volumes:
