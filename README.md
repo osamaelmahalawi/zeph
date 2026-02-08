@@ -29,6 +29,20 @@ Download from [GitHub Releases](https://github.com/bug-ops/zeph/releases/latest)
 | macOS | x86_64 | `zeph-x86_64-apple-darwin.tar.gz` |
 | macOS | aarch64 | `zeph-aarch64-apple-darwin.tar.gz` |
 
+### Docker
+
+Pull the latest image from GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/bug-ops/zeph:latest
+```
+
+Or use a specific version:
+
+```bash
+docker pull ghcr.io/bug-ops/zeph:v0.4.0
+```
+
 ## Usage
 
 ### CLI mode (default)
