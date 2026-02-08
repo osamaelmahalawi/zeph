@@ -230,30 +230,60 @@ context_budget_tokens = 8000  # Set to LLM context window size (0 = unlimited)
 
 ## Docker
 
-**Tip:** Add `--build` to rebuild the image after code changes. Pass `ZEPH_TELEGRAM_TOKEN=xxx` to enable Telegram mode.
+**Note:** Docker Compose automatically pulls the latest image from GitHub Container Registry. To use a specific version, set `ZEPH_IMAGE=ghcr.io/bug-ops/zeph:v0.4.0`.
 
 <details>
 <summary><b>🐳 Docker Deployment Options</b> (click to expand)</summary>
 
+### Quick Start (Ollama + Qdrant in containers)
+
+```bash
+# Pull Ollama models first
+docker compose --profile cpu run --rm ollama ollama pull mistral:7b
+docker compose --profile cpu run --rm ollama ollama pull qwen3-embedding
+
+# Start all services
+docker compose --profile cpu up
+```
+
 ### Apple Silicon (Ollama on host with Metal GPU)
 
 ```bash
+# Use Ollama on macOS host for Metal GPU acceleration
 ollama pull mistral:7b
 ollama pull qwen3-embedding
 ollama serve &
+
+# Start Zeph + Qdrant, connect to host Ollama
 ZEPH_LLM_BASE_URL=http://host.docker.internal:11434 docker compose up
-```
-
-### Ollama in container (CPU)
-
-```bash
-docker compose --profile cpu up
 ```
 
 ### Linux with NVIDIA GPU
 
 ```bash
+# Pull models first
+docker compose --profile gpu run --rm ollama ollama pull mistral:7b
+docker compose --profile gpu run --rm ollama ollama pull qwen3-embedding
+
+# Start all services with GPU
 docker compose --profile gpu -f docker-compose.yml -f docker-compose.gpu.yml up
+```
+
+### Using Specific Version
+
+```bash
+# Use a specific release version
+ZEPH_IMAGE=ghcr.io/bug-ops/zeph:v0.4.0 docker compose up
+
+# Always pull latest
+docker compose pull && docker compose up
+```
+
+### Local Development (build from source)
+
+```bash
+# Build and run local changes
+ZEPH_IMAGE=zeph:local docker compose up --build
 ```
 
 </details>

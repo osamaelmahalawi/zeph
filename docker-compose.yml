@@ -23,7 +23,8 @@ services:
       - cpu
 
   zeph:
-    build: .
+    image: ${ZEPH_IMAGE:-ghcr.io/bug-ops/zeph:latest}
+    pull_policy: always
     depends_on:
       ollama:
         condition: service_started
