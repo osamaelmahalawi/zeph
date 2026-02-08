@@ -3,9 +3,10 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/bug-ops/zeph/ci.yml?branch=main)](https://github.com/bug-ops/zeph/actions)
 [![codecov](https://codecov.io/gh/bug-ops/zeph/graph/badge.svg?token=S5O0GR9U6G)](https://codecov.io/gh/bug-ops/zeph)
 [![Security](https://img.shields.io/badge/security-hardened-brightgreen)](SECURITY.md)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Lightweight AI agent with hybrid inference (Ollama / Claude), skills-first architecture, semantic memory with Qdrant, and multi-channel I/O.
+Lightweight AI agent with hybrid inference (Ollama / Claude), skills-first architecture, semantic memory with Qdrant, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
 
 ## Installation
 
@@ -29,6 +30,8 @@ Download from [GitHub Releases](https://github.com/bug-ops/zeph/releases/latest)
 | Linux | aarch64 | `zeph-aarch64-unknown-linux-gnu.tar.gz` |
 | macOS | x86_64 | `zeph-x86_64-apple-darwin.tar.gz` |
 | macOS | aarch64 | `zeph-aarch64-apple-darwin.tar.gz` |
+| Windows | x86_64 | `zeph-x86_64-pc-windows-msvc.zip` |
+| Windows | aarch64 | `zeph-aarch64-pc-windows-msvc.zip` |
 
 ### Docker
 
@@ -50,16 +53,28 @@ docker pull ghcr.io/bug-ops/zeph:v0.4.1
 
 ### CLI mode (default)
 
+**Unix (Linux/macOS):**
 ```bash
 ./target/release/zeph
+```
+
+**Windows:**
+```powershell
+.\target\release\zeph.exe
 ```
 
 Type messages at the `You:` prompt. Type `exit`, `quit`, or press Ctrl-D to stop.
 
 ### Telegram mode
 
+**Unix (Linux/macOS):**
 ```bash
 ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
+```
+
+**Windows:**
+```powershell
+$env:ZEPH_TELEGRAM_TOKEN="123:ABC"; .\target\release\zeph.exe
 ```
 
 **Tip:** Restrict access by setting `telegram.allowed_users` in the config file.
