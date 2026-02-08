@@ -43,8 +43,7 @@ Or use a specific version:
 docker pull ghcr.io/bug-ops/zeph:v0.4.0
 ```
 
-> [!NOTE]
-> Docker images are automatically scanned with [Trivy](https://trivy.dev/) for security vulnerabilities. Images use Oracle Linux 9 Slim base with **0 HIGH/CRITICAL CVEs**. Multi-platform support: linux/amd64, linux/arm64.
+**Security:** Images are scanned with [Trivy](https://trivy.dev/) and use Oracle Linux 9 Slim base with **0 HIGH/CRITICAL CVEs**. Multi-platform: linux/amd64, linux/arm64.
 
 ## Usage
 
@@ -62,18 +61,16 @@ Type messages at the `You:` prompt. Type `exit`, `quit`, or press Ctrl-D to stop
 ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
 ```
 
-> [!TIP]
-> Restrict access by setting `telegram.allowed_users` in the config file.
+**Tip:** Restrict access by setting `telegram.allowed_users` in the config file.
 
 ## Configuration
 
-> [!NOTE]
-> When using Ollama, ensure both the LLM model and embedding model are pulled:
-> ```bash
-> ollama pull mistral:7b
-> ollama pull qwen3-embedding
-> ```
-> The default configuration uses `mistral:7b` for text generation and `qwen3-embedding` for vector embeddings. These models are independent and work together seamlessly.
+**Note:** When using Ollama, ensure both the LLM model and embedding model are pulled:
+```bash
+ollama pull mistral:7b
+ollama pull qwen3-embedding
+```
+The default configuration uses `mistral:7b` for text generation and `qwen3-embedding` for vector embeddings.
 
 <details>
 <summary><b>📝 Configuration File</b> (click to expand)</summary>
@@ -171,11 +168,9 @@ All loaded skills are injected into the system prompt.
 
 ## Semantic Memory (Optional)
 
-> [!TIP]
-> Enable semantic search to retrieve contextually relevant messages from conversation history using vector similarity.
+Enable semantic search to retrieve contextually relevant messages from conversation history using vector similarity.
 
-> [!NOTE]
-> Requires Ollama with an embedding model (e.g., `qwen3-embedding`). Claude API does not support embeddings natively.
+**Note:** Requires Ollama with an embedding model (e.g., `qwen3-embedding`). Claude API does not support embeddings natively.
 
 <details>
 <summary><b>🧠 Semantic Memory with Qdrant</b> (click to expand)</summary>
@@ -206,11 +201,10 @@ Zeph supports optional integration with [Qdrant](https://qdrant.tech/) for seman
 
 ## Conversation Summarization (Optional)
 
-> [!TIP]
-> Automatically compress long conversation histories using LLM-based summarization to stay within context budget limits.
+Automatically compress long conversation histories using LLM-based summarization to stay within context budget limits.
 
 > [!IMPORTANT]
-> Summarization requires an LLM provider (Ollama or Claude). Set `context_budget_tokens = 0` to disable proportional allocation and use unlimited context.
+> Requires an LLM provider (Ollama or Claude). Set `context_budget_tokens = 0` to disable proportional allocation and use unlimited context.
 
 <details>
 <summary><b>📝 Automatic Conversation Summarization</b> (click to expand)</summary>
@@ -236,8 +230,7 @@ context_budget_tokens = 8000  # Set to LLM context window size (0 = unlimited)
 
 ## Docker
 
-> [!TIP]
-> Add `--build` to rebuild the image after code changes. Pass `ZEPH_TELEGRAM_TOKEN=xxx` to enable Telegram mode.
+**Tip:** Add `--build` to rebuild the image after code changes. Pass `ZEPH_TELEGRAM_TOKEN=xxx` to enable Telegram mode.
 
 <details>
 <summary><b>🐳 Docker Deployment Options</b> (click to expand)</summary>
