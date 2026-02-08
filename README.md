@@ -43,6 +43,9 @@ Or use a specific version:
 docker pull ghcr.io/bug-ops/zeph:v0.4.0
 ```
 
+> [!NOTE]
+> Docker images are automatically scanned with [Trivy](https://trivy.dev/) for security vulnerabilities. Images use Oracle Linux 9 Slim base with **0 HIGH/CRITICAL CVEs**. Multi-platform support: linux/amd64, linux/arm64.
+
 ## Usage
 
 ### CLI mode (default)
@@ -64,8 +67,6 @@ ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
 
 ## Configuration
 
-Zeph loads `config/default.toml` at startup and applies environment variable overrides.
-
 > [!NOTE]
 > When using Ollama, ensure both the LLM model and embedding model are pulled:
 > ```bash
@@ -73,6 +74,11 @@ Zeph loads `config/default.toml` at startup and applies environment variable ove
 > ollama pull qwen3-embedding
 > ```
 > The default configuration uses `mistral:7b` for text generation and `qwen3-embedding` for vector embeddings. These models are independent and work together seamlessly.
+
+<details>
+<summary><b>📝 Configuration File</b> (click to expand)</summary>
+
+Zeph loads `config/default.toml` at startup and applies environment variable overrides.
 
 ```toml
 [agent]
@@ -109,7 +115,13 @@ timeout = 30
 blocked_commands = []  # Additional patterns beyond defaults
 ```
 
-### Environment variables
+</details>
+
+> [!IMPORTANT]
+> Shell commands are filtered for safety. Dangerous commands (`rm -rf /`, `sudo`, `mkfs`, `dd`, `curl`, `wget`, `nc`, `shutdown`) are blocked by default. Add custom patterns via `tools.shell.blocked_commands` in config.
+
+<details>
+<summary><b>🔧 Environment Variables</b> (click to expand)</summary>
 
 | Variable | Description |
 |----------|-------------|
@@ -125,10 +137,12 @@ blocked_commands = []  # Additional patterns beyond defaults
 | `ZEPH_MEMORY_CONTEXT_BUDGET_TOKENS` | Context budget for proportional token allocation (default: 0 = unlimited) |
 | `ZEPH_TOOLS_TIMEOUT` | Shell command timeout in seconds (default: 30) |
 
-> [!IMPORTANT]
-> Shell commands are filtered for safety. Dangerous commands (`rm -rf /`, `sudo`, `mkfs`, `dd`, `curl`, `wget`, `nc`, `shutdown`) are blocked by default. Add custom patterns via `tools.shell.blocked_commands` in config.
+</details>
 
 ## Skills
+
+<details>
+<summary><b>🛠️ Skills System</b> (click to expand)</summary>
 
 Drop `SKILL.md` files into subdirectories under `skills/` to extend agent capabilities:
 
@@ -153,10 +167,18 @@ Use curl to fetch search results...
 
 All loaded skills are injected into the system prompt.
 
+</details>
+
 ## Semantic Memory (Optional)
 
 > [!TIP]
 > Enable semantic search to retrieve contextually relevant messages from conversation history using vector similarity.
+
+> [!NOTE]
+> Requires Ollama with an embedding model (e.g., `qwen3-embedding`). Claude API does not support embeddings natively.
+
+<details>
+<summary><b>🧠 Semantic Memory with Qdrant</b> (click to expand)</summary>
 
 Zeph supports optional integration with [Qdrant](https://qdrant.tech/) for semantic memory:
 
@@ -180,13 +202,18 @@ Zeph supports optional integration with [Qdrant](https://qdrant.tech/) for seman
 
 5. **Graceful degradation:** If Qdrant is unavailable, Zeph falls back to SQLite-only mode (recency-based history).
 
-> [!NOTE]
-> Requires Ollama with an embedding model (e.g., `qwen3-embedding`). Claude API does not support embeddings natively.
+</details>
 
 ## Conversation Summarization (Optional)
 
 > [!TIP]
 > Automatically compress long conversation histories using LLM-based summarization to stay within context budget limits.
+
+> [!IMPORTANT]
+> Summarization requires an LLM provider (Ollama or Claude). Set `context_budget_tokens = 0` to disable proportional allocation and use unlimited context.
+
+<details>
+<summary><b>📝 Automatic Conversation Summarization</b> (click to expand)</summary>
 
 Zeph supports automatic conversation summarization:
 
@@ -205,10 +232,15 @@ summarization_threshold = 100
 context_budget_tokens = 8000  # Set to LLM context window size (0 = unlimited)
 ```
 
-> [!IMPORTANT]
-> Summarization requires an LLM provider (Ollama or Claude). Set `context_budget_tokens = 0` to disable proportional allocation and use unlimited context.
+</details>
 
 ## Docker
+
+> [!TIP]
+> Add `--build` to rebuild the image after code changes. Pass `ZEPH_TELEGRAM_TOKEN=xxx` to enable Telegram mode.
+
+<details>
+<summary><b>🐳 Docker Deployment Options</b> (click to expand)</summary>
 
 ### Apple Silicon (Ollama on host with Metal GPU)
 
@@ -231,10 +263,12 @@ docker compose --profile cpu up
 docker compose --profile gpu -f docker-compose.yml -f docker-compose.gpu.yml up
 ```
 
-> [!TIP]
-> Add `--build` to rebuild the image after code changes. Pass `ZEPH_TELEGRAM_TOKEN=xxx` to enable Telegram mode.
+</details>
 
 ## Architecture
+
+<details>
+<summary><b>🏗️ Project Structure</b> (click to expand)</summary>
 
 ```
 zeph (binary)
@@ -245,6 +279,8 @@ zeph (binary)
 ├── zeph-channels   Telegram adapter (teloxide) with streaming
 └── zeph-tools      ToolExecutor trait, ShellExecutor with bash parser
 ```
+
+</details>
 
 > [!IMPORTANT]
 > Requires Rust 1.88+ (Edition 2024). Native async traits are used throughout — no `async-trait` crate.
