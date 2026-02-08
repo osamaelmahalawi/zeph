@@ -12,7 +12,8 @@ COPY binaries/zeph-${TARGETARCH} /app/zeph
 COPY config/ /app/config/
 COPY skills/ /app/skills/
 
-RUN chown -R zeph:zeph /app && \
+RUN mkdir -p /app/data && \
+    chown -R zeph:zeph /app && \
     chmod +x /app/zeph
 
 USER zeph
