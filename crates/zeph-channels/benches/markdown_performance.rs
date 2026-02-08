@@ -1,4 +1,5 @@
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use zeph_channels::markdown::{markdown_to_telegram, utf8_chunks};
 
 fn generate_text(size: usize, pattern: &str) -> String {
