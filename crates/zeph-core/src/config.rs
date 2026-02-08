@@ -211,13 +211,18 @@ mod tests {
 
     use super::*;
 
-    const ENV_KEYS: [&str; 6] = [
+    const ENV_KEYS: [&str; 11] = [
         "ZEPH_LLM_PROVIDER",
         "ZEPH_LLM_BASE_URL",
         "ZEPH_LLM_MODEL",
         "ZEPH_LLM_EMBEDDING_MODEL",
+        "ZEPH_CLAUDE_API_KEY",
         "ZEPH_SQLITE_PATH",
         "ZEPH_QDRANT_URL",
+        "ZEPH_MEMORY_SUMMARIZATION_THRESHOLD",
+        "ZEPH_MEMORY_CONTEXT_BUDGET_TOKENS",
+        "ZEPH_TELEGRAM_TOKEN",
+        "ZEPH_TOOLS_TIMEOUT",
     ];
 
     fn clear_env() {
