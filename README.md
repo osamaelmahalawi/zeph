@@ -1,6 +1,5 @@
 # Zeph
 
-[![CI](https://img.shields.io/github/actions/workflow/status/bug-ops/zeph/ci.yml?branch=main)](https://github.com/bug-ops/zeph/actions)
 [![codecov](https://codecov.io/gh/bug-ops/zeph/graph/badge.svg?token=S5O0GR9U6G)](https://codecov.io/gh/bug-ops/zeph)
 [![Security](https://img.shields.io/badge/security-hardened-brightgreen)](SECURITY.md)
 [![Trivy Scan](https://img.shields.io/badge/Trivy-0%20CVEs-success)](https://github.com/bug-ops/zeph/security)
@@ -9,6 +8,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Lightweight AI agent with hybrid inference (Ollama / Claude), skills-first architecture, semantic memory with Qdrant, A2A protocol support, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
+
+<div align="center">
+  <img src="asset/zeph-logo.png" alt="Zeph" width="600">
+</div>
 
 ## Installation
 
