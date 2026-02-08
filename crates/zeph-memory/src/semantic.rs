@@ -107,7 +107,11 @@ impl<P: LlmProvider> SemanticMemory<P> {
         {
             match self.provider.embed(content).await {
                 Ok(vector) => {
-                    if let Err(e) = qdrant
+                    // Ensure collection exists before storing
+                    let vector_size = u64::try_from(vector.len()).unwrap_or(896);
+                    if let Err(e) = qdrant.ensure_collection(vector_size).await {
+                        tracing::warn!("Failed to ensure Qdrant collection: {e:#}");
+                    } else if let Err(e) = qdrant
                         .store(
                             message_id,
                             conversation_id,
@@ -150,6 +154,10 @@ impl<P: LlmProvider> SemanticMemory<P> {
         }
 
         let query_vector = self.provider.embed(query).await?;
+
+        // Ensure collection exists before searching
+        let vector_size = u64::try_from(query_vector.len()).unwrap_or(896);
+        qdrant.ensure_collection(vector_size).await?;
 
         let results = qdrant.search(&query_vector, limit, filter).await?;
 
@@ -350,7 +358,11 @@ impl<P: LlmProvider> SemanticMemory<P> {
         {
             match self.provider.embed(&summary_text).await {
                 Ok(vector) => {
-                    if let Err(e) = qdrant
+                    // Ensure collection exists before storing
+                    let vector_size = u64::try_from(vector.len()).unwrap_or(896);
+                    if let Err(e) = qdrant.ensure_collection(vector_size).await {
+                        tracing::warn!("Failed to ensure Qdrant collection: {e:#}");
+                    } else if let Err(e) = qdrant
                         .store(
                             summary_id,
                             conversation_id,
