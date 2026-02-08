@@ -209,6 +209,8 @@ impl Config {
 mod tests {
     use std::io::Write;
 
+    use serial_test::serial;
+
     use super::*;
 
     const ENV_KEYS: [&str; 11] = [
@@ -323,6 +325,7 @@ history_limit = 50
     }
 
     #[test]
+    #[serial]
     fn env_overrides() {
         clear_env();
         let mut config = Config::default();
@@ -374,7 +377,9 @@ allowed_users = ["alice", "bob"]
     }
 
     #[test]
+    #[serial]
     fn telegram_env_override() {
+        clear_env();
         let mut config = Config::default();
         assert!(config.telegram.is_none());
 
@@ -462,7 +467,9 @@ history_limit = 50
     }
 
     #[test]
+    #[serial]
     fn env_override_tools_timeout() {
+        clear_env();
         let mut config = Config::default();
         assert_eq!(config.tools.shell.timeout, 30);
 
@@ -474,7 +481,9 @@ history_limit = 50
     }
 
     #[test]
+    #[serial]
     fn env_override_tools_timeout_invalid_ignored() {
+        clear_env();
         let mut config = Config::default();
         assert_eq!(config.tools.shell.timeout, 30);
 
@@ -525,6 +534,7 @@ history_limit = 50
     }
 
     #[test]
+    #[serial]
     fn config_env_override_embedding_model() {
         let mut config = Config::default();
         assert_eq!(config.llm.embedding_model, "qwen3-embedding");
@@ -608,6 +618,7 @@ qdrant_url = "http://qdrant:6334"
     }
 
     #[test]
+    #[serial]
     fn config_env_override_qdrant_url() {
         let mut config = Config::default();
         assert_eq!(config.memory.qdrant_url, "http://localhost:6334");
@@ -659,6 +670,7 @@ summarization_threshold = 200
     }
 
     #[test]
+    #[serial]
     fn config_env_override_summarization_threshold() {
         let mut config = Config::default();
         assert_eq!(config.memory.summarization_threshold, 100);
@@ -710,6 +722,7 @@ context_budget_tokens = 4096
     }
 
     #[test]
+    #[serial]
     fn config_env_override_context_budget_tokens() {
         let mut config = Config::default();
         assert_eq!(config.memory.context_budget_tokens, 0);
