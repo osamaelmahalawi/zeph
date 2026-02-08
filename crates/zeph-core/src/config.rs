@@ -324,6 +324,7 @@ history_limit = 50
 
     #[test]
     fn env_overrides() {
+        clear_env();
         let mut config = Config::default();
         assert_eq!(config.llm.model, "mistral:7b");
 
