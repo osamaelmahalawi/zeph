@@ -7,7 +7,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Lightweight AI agent with hybrid inference (Ollama / Claude / HuggingFace via candle), skills-first architecture, semantic memory with Qdrant, MCP client, A2A protocol support, multi-model orchestration, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
+Lightweight AI agent with hybrid inference (Ollama / Claude / HuggingFace via candle), skills-first architecture, semantic memory with Qdrant, MCP client, A2A protocol support, multi-model orchestration, self-learning skill evolution, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
 
 <div align="center">
   <img src="asset/zeph-logo.png" alt="Zeph" width="600">
@@ -182,7 +182,7 @@ rate_limit = 60
 
 Zeph uses an embedding-based skill system: only the most relevant skills are injected into the LLM context per query using cosine similarity matching.
 
-Eleven bundled skills: `web-search`, `web-scrape`, `file-ops`, `system-info`, `git`, `docker`, `api-request`, `setup-guide`, `skill-audit`, `mcp-generate`, `skill-creator`. Use `/skills` in chat to list available skills with usage statistics.
+Eleven bundled skills: `web-search`, `web-scrape`, `file-ops`, `system-info`, `git`, `docker`, `api-request`, `setup-guide`, `skill-audit`, `skill-creator`, `mcp-generate`. Use `/skills` in chat to list available skills with usage statistics.
 
 <details>
 <summary><b>🛠️ Skills System</b> (click to expand)</summary>
@@ -545,6 +545,42 @@ MCP tools are embedded in Qdrant (`zeph_mcp_tools` collection) with BLAKE3 conte
 
 </details>
 
+## Self-Learning Skills (Optional)
+
+Automatically improve skills based on execution outcomes. When a skill fails repeatedly, Zeph uses self-reflection and LLM-generated improvements to create better skill versions.
+
+```bash
+cargo build --release --features self-learning
+```
+
+<details>
+<summary><b>Self-Learning Configuration</b> (click to expand)</summary>
+
+```toml
+[skills.learning]
+enabled = true
+auto_activate = false     # require manual approval for new versions
+min_failures = 3          # failures before triggering improvement
+improve_threshold = 0.7   # success rate below which improvement starts
+rollback_threshold = 0.5  # auto-rollback when success rate drops below this
+min_evaluations = 5       # minimum evaluations before rollback decision
+max_versions = 10         # max auto-generated versions per skill
+cooldown_minutes = 60     # cooldown between improvements for same skill
+```
+
+**Chat commands:**
+- `/skill stats` — view skill execution metrics
+- `/skill versions` — list generated skill versions
+- `/skill activate <id>` — activate a specific version
+- `/skill approve <id>` — approve a pending version
+- `/skill reset <name>` — reset skill to original version
+- `/feedback` — provide explicit feedback on skill quality
+
+</details>
+
+> [!TIP]
+> Set `auto_activate = false` (default) to review and manually approve LLM-generated skill improvements before they go live.
+
 ## Feature Flags
 
 | Feature | Default | Description |
@@ -555,6 +591,7 @@ MCP tools are embedded in Qdrant (`zeph_mcp_tools` collection) with BLAKE3 conte
 | `metal` | Disabled | Metal GPU acceleration for candle on macOS (implies `candle`) |
 | `cuda` | Disabled | CUDA GPU acceleration for candle on Linux (implies `candle`) |
 | `orchestrator` | Disabled | Multi-model routing with task-based classification and fallback chains |
+| `self-learning` | Disabled | Skill evolution via failure detection, self-reflection, and LLM-generated improvements |
 
 Build with specific features:
 
@@ -562,6 +599,7 @@ Build with specific features:
 cargo build --release                                     # default (a2a only)
 cargo build --release --features candle,orchestrator      # local inference + orchestrator
 cargo build --release --features candle,metal             # macOS with Metal GPU
+cargo build --release --features self-learning            # skill evolution system
 cargo build --release --no-default-features               # minimal binary
 ```
 

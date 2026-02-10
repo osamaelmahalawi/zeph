@@ -33,7 +33,10 @@ Zeph supports two skill matching backends:
 | `docker` | Docker container operations — build, run, ps, logs, compose |
 | `file-ops` | File system operations — list, search, read, and analyze files |
 | `git` | Git version control — status, log, diff, commit, branch management |
+| `mcp-generate` | Generate MCP-to-skill bridges for external tool servers |
 | `setup-guide` | Configuration reference — LLM providers, memory, tools, and operating modes |
+| `skill-audit` | Spec compliance and security review of installed skills |
+| `skill-creator` | Create new skills following the agentskills.io specification |
 | `system-info` | System diagnostics — OS, disk, memory, processes, uptime |
 | `web-scrape` | Extract structured data from web pages using CSS selectors |
 | `web-search` | Search the internet for current information |
@@ -131,6 +134,29 @@ ollama pull qwen3-embedding
 ```
 
 If the embedding model is unavailable, Zeph falls back to using all skills for every query.
+
+## Self-Learning (Optional)
+
+When built with `--features self-learning`, Zeph tracks skill execution outcomes and automatically generates improved versions of underperforming skills.
+
+**How it works:**
+1. Each skill invocation is tracked as success or failure
+2. When a skill's success rate drops below `improve_threshold`, Zeph triggers self-reflection
+3. The agent retries with adjusted context (1 retry per message)
+4. If failures persist beyond `min_failures`, the LLM generates an improved skill version
+5. New versions can be auto-activated or held for manual approval
+6. If an activated version performs worse than `rollback_threshold`, automatic rollback occurs
+
+**Chat commands:**
+- `/skill stats` — execution metrics per skill
+- `/skill versions` — list auto-generated versions
+- `/skill activate <id>` — activate a version
+- `/skill approve <id>` — approve a pending version
+- `/skill reset <name>` — revert to original
+- `/feedback` — provide explicit quality feedback
+
+> [!IMPORTANT]
+> Self-learning requires the `self-learning` feature flag: `cargo build --features self-learning`. Skill versions and outcomes are stored in SQLite (`skill_versions` and `skill_outcomes` tables).
 
 ## Hot Reload
 
