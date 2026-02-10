@@ -7,7 +7,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Lightweight AI agent with hybrid inference (Ollama / Claude), skills-first architecture, semantic memory with Qdrant, A2A protocol support, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
+Lightweight AI agent with hybrid inference (Ollama / Claude / HuggingFace via candle), skills-first architecture, semantic memory with Qdrant, MCP client, A2A protocol support, multi-model orchestration, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
 
 <div align="center">
   <img src="asset/zeph-logo.png" alt="Zeph" width="600">
@@ -155,7 +155,7 @@ rate_limit = 60
 
 | Variable | Description |
 |----------|-------------|
-| `ZEPH_LLM_PROVIDER` | `ollama` or `claude` |
+| `ZEPH_LLM_PROVIDER` | `ollama`, `claude`, `candle`, or `orchestrator` |
 | `ZEPH_LLM_BASE_URL` | Ollama API endpoint |
 | `ZEPH_LLM_MODEL` | Model name for Ollama |
 | `ZEPH_LLM_EMBEDDING_MODEL` | Embedding model for Ollama (default: `qwen3-embedding`) |
@@ -182,7 +182,7 @@ rate_limit = 60
 
 Zeph uses an embedding-based skill system: only the most relevant skills are injected into the LLM context per query using cosine similarity matching.
 
-Eight bundled skills: `web-search`, `web-scrape`, `file-ops`, `system-info`, `git`, `docker`, `api-request`, `setup-guide`. Use `/skills` in chat to list available skills with usage statistics.
+Eleven bundled skills: `web-search`, `web-scrape`, `file-ops`, `system-info`, `git`, `docker`, `api-request`, `setup-guide`, `skill-audit`, `mcp-generate`, `skill-creator`. Use `/skills` in chat to list available skills with usage statistics.
 
 <details>
 <summary><b>🛠️ Skills System</b> (click to expand)</summary>
@@ -412,7 +412,7 @@ Docker images follow security best practices:
 
 Rust-native memory safety guarantees:
 
-- **Zero `unsafe` blocks:** Project policy enforces `#![forbid(unsafe_code)]`
+- **Minimal `unsafe`:** One audited `unsafe` block behind `candle` feature flag (memory-mapped safetensors loading). Core crates enforce `#![deny(unsafe_code)]`
 - **No panic in production:** `unwrap()` and `expect()` linted via clippy
 - **Secure dependencies:** All crates audited with `cargo-deny`
 - **MSRV policy:** Rust 1.88+ (Edition 2024) for latest security patches
@@ -447,16 +447,122 @@ The server exposes:
 > [!TIP]
 > Set `ZEPH_A2A_AUTH_TOKEN` to secure the server with bearer token authentication. The agent card endpoint remains public per A2A spec.
 
+## Local Inference (Optional)
+
+Run HuggingFace models locally via [candle](https://github.com/huggingface/candle) without external API dependencies. Supports GGUF quantized models with Metal/CUDA acceleration.
+
+```bash
+cargo build --release --features candle,metal  # macOS with Metal GPU
+```
+
+<details>
+<summary><b>Candle Configuration</b> (click to expand)</summary>
+
+```toml
+[llm]
+provider = "candle"
+
+[llm.candle]
+source = "huggingface"
+repo_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+filename = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+template = "mistral"              # llama3, chatml, mistral, phi3, raw
+embedding_repo = "sentence-transformers/all-MiniLM-L6-v2"  # optional BERT embeddings
+
+[llm.candle.generation]
+temperature = 0.7
+top_p = 0.9
+top_k = 40
+max_tokens = 2048
+repeat_penalty = 1.1
+```
+
+Supported chat templates: `llama3`, `chatml`, `mistral`, `phi3`, `raw`.
+
+Device auto-detection: Metal on macOS, CUDA on Linux with GPU, CPU fallback.
+
+</details>
+
+## Model Orchestrator (Optional)
+
+Route tasks to different LLM providers based on content classification. Each task type (coding, creative, analysis, translation, summarization, general) maps to a provider chain with automatic fallback.
+
+```bash
+cargo build --release --features candle,orchestrator
+```
+
+<details>
+<summary><b>Orchestrator Configuration</b> (click to expand)</summary>
+
+```toml
+[llm]
+provider = "orchestrator"
+
+[llm.orchestrator.providers.local]
+type = "candle"
+repo_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+filename = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
+template = "mistral"
+
+[llm.orchestrator.providers.cloud]
+type = "claude"
+
+[llm.orchestrator.routes]
+coding = ["local", "cloud"]       # try local first, fallback to cloud
+creative = ["cloud"]              # cloud only
+analysis = ["cloud", "local"]     # prefer cloud
+general = ["local"]               # local only
+```
+
+Task classification uses keyword heuristics. Fallback chains try providers in order until one succeeds.
+
+</details>
+
+## MCP Integration (Optional)
+
+Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Tools are discovered, embedded, and matched alongside skills using the same cosine similarity pipeline.
+
+```bash
+cargo build --release --features mcp
+```
+
+<details>
+<summary><b>MCP Configuration</b> (click to expand)</summary>
+
+```toml
+[[mcp.servers]]
+name = "filesystem"
+command = "npx"
+args = ["-y", "@anthropic/mcp-filesystem"]
+
+[[mcp.servers]]
+name = "github"
+command = "npx"
+args = ["-y", "@anthropic/mcp-github"]
+```
+
+MCP tools are embedded in Qdrant (`zeph_mcp_tools` collection) with BLAKE3 content-hash delta sync. Unified matching injects both skills and MCP tools into the system prompt by relevance score.
+
+</details>
+
 ## Feature Flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `a2a` | Enabled | [A2A protocol](https://github.com/a2aproject/A2A) client and server for agent-to-agent communication |
+| `mcp` | Disabled | MCP client for external tool servers via stdio transport |
+| `candle` | Disabled | Local HuggingFace model inference via [candle](https://github.com/huggingface/candle) (GGUF quantized models) |
+| `metal` | Disabled | Metal GPU acceleration for candle on macOS (implies `candle`) |
+| `cuda` | Disabled | CUDA GPU acceleration for candle on Linux (implies `candle`) |
+| `orchestrator` | Disabled | Multi-model routing with task-based classification and fallback chains |
 
-Disable optional features for a smaller binary:
+Build with specific features:
 
 ```bash
-cargo build --release --no-default-features
+cargo build --release                                     # default (a2a only)
+cargo build --release --features candle,orchestrator      # local inference + orchestrator
+cargo build --release --features candle,metal             # macOS with Metal GPU
+cargo build --release --no-default-features               # minimal binary
 ```
 
 ## Architecture
@@ -467,11 +573,12 @@ cargo build --release --no-default-features
 ```
 zeph (binary)
 ├── zeph-core       Agent loop, config, channel trait, context builder
-├── zeph-llm        LlmProvider trait, Ollama + Claude backends, token streaming, embeddings
+├── zeph-llm        LlmProvider trait, Ollama + Claude + Candle backends, orchestrator, embeddings
 ├── zeph-skills     SKILL.md parser, registry, embedding matcher, hot-reload watcher
 ├── zeph-memory     SQLite + Qdrant, SemanticMemory orchestrator, summarization
 ├── zeph-channels   Telegram adapter (teloxide) with streaming
 ├── zeph-tools      ToolExecutor trait, ShellExecutor, WebScrapeExecutor, CompositeExecutor
+├── zeph-mcp        MCP client via rmcp, multi-server lifecycle, unified tool matching (optional)
 └── zeph-a2a        A2A protocol client + server, agent discovery, JSON-RPC 2.0 (optional)
 ```
 
