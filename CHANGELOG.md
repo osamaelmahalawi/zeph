@@ -13,6 +13,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - CLI vault args: `--vault <backend>`, `--vault-key <path>`, `--vault-path <path>`
 - `vault-age` feature flag on `zeph-core` and root binary
 - `[vault]` config section with `backend` field (default: `env`)
+- `docker-compose.vault.yml` overlay for containerized age vault deployment
+- `CARGO_FEATURES` build arg in `Dockerfile.dev` for optional feature flags
 - `CandleProvider`: local GGUF model inference via candle ML framework with chat templates (Llama3, ChatML, Mistral, Phi3, Raw), token generation with top-k/top-p sampling, and repeat penalty (Issue #125)
 - `CandleProvider` embeddings: BERT-based embedding model loaded from HuggingFace Hub with mean pooling and L2 normalization (Issue #126)
 - `ModelOrchestrator`: task-aware multi-model routing with keyword-based classification (coding, creative, analysis, translation, summarization, general) and provider fallback chains (Issue #127)

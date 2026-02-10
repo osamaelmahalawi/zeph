@@ -353,7 +353,7 @@ ZEPH_VAULT_KEY=./my-key.txt ZEPH_VAULT_PATH=./my-secrets.age \
 ```
 
 > [!IMPORTANT]
-> The image must be built with `vault-age` feature enabled. Pre-built images include this feature by default.
+> The image must be built with `vault-age` feature enabled. For local builds, use `CARGO_FEATURES=vault-age` with `docker-compose.dev.yml` (see [Local Development](#local-development)).
 
 ### Using Specific Version
 
@@ -372,6 +372,13 @@ Full stack with debug tracing (builds from source via `Dockerfile.dev`, uses hos
 ```bash
 # Build and start Qdrant + Zeph with debug logging
 docker compose -f docker-compose.dev.yml up --build
+
+# Build with optional features (e.g. vault-age, candle)
+CARGO_FEATURES=vault-age docker compose -f docker-compose.dev.yml up --build
+
+# Build with vault-age and mount vault files
+CARGO_FEATURES=vault-age \
+  docker compose -f docker-compose.dev.yml -f docker-compose.vault.yml up --build
 ```
 
 Dependencies only (run zeph natively on host):
