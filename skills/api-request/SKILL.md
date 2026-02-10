@@ -1,6 +1,7 @@
 ---
 name: api-request
-description: HTTP API requests using curl - GET, POST, PUT, DELETE with headers and JSON.
+description: Send HTTP API requests using curl. Use when the user asks to call an API, fetch a URL, send POST/PUT/DELETE requests, or work with REST endpoints and JSON payloads.
+compatibility: Requires curl
 ---
 # API Requests
 

@@ -1,6 +1,6 @@
 ---
 name: system-info
-description: Get system information - OS, disk, memory, processes.
+description: Retrieve system diagnostics and resource usage. Use when the user asks about OS version, disk space, memory usage, running processes, CPU load, or system uptime.
 ---
 # System Info
 

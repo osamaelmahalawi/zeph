@@ -1,6 +1,6 @@
 ---
 name: file-ops
-description: File system operations - list, search, read, and analyze files.
+description: Perform file system operations. Use when the user asks to list directory contents, find files by name or pattern, search text inside files, or check file size and type.
 ---
 # File Operations
 

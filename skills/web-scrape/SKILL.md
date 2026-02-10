@@ -1,6 +1,6 @@
 ---
 name: web-scrape
-description: Extract structured data from web pages using CSS selectors.
+description: Extract structured data from web pages using CSS selectors. Use when the user asks to scrape a website, extract text or links from a page, or parse HTML content from a URL.
 ---
 # Web Scrape
 

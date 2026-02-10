@@ -1,6 +1,6 @@
 ---
 name: setup-guide
-description: Zeph configuration reference — LLM providers, memory, tools, and operating modes.
+description: Zeph configuration reference. Use when the user asks about setup, configuration, environment variables, TOML settings, or how to enable specific features like Telegram, Qdrant, or A2A.
 ---
 # Setup Guide
 

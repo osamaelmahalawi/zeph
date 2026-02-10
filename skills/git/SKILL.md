@@ -1,6 +1,7 @@
 ---
 name: git
-description: Git version control operations - status, log, diff, commit, branch management.
+description: Run git version control commands. Use when the user asks to check repository status, view commit history, show diffs, stage and commit changes, or manage branches.
+compatibility: Requires git
 ---
 # Git Operations
 

@@ -1,6 +1,7 @@
 ---
 name: docker
-description: Docker container operations - build, run, ps, logs, compose.
+description: Manage Docker containers and images. Use when the user asks to build, run, stop, or inspect containers, view logs, or work with docker compose.
+compatibility: Requires docker
 ---
 # Docker Operations
 
