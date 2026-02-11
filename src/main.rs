@@ -12,6 +12,8 @@ use zeph_core::vault::{EnvVaultProvider, VaultProvider};
 use zeph_llm::any::AnyProvider;
 use zeph_llm::claude::ClaudeProvider;
 use zeph_llm::ollama::OllamaProvider;
+#[cfg(feature = "openai")]
+use zeph_llm::openai::OpenAiProvider;
 use zeph_llm::provider::LlmProvider;
 use zeph_memory::semantic::SemanticMemory;
 use zeph_skills::loader::SkillMeta;
@@ -97,6 +99,7 @@ async fn main() -> anyhow::Result<()> {
     config.resolve_secrets(vault.as_ref()).await?;
 
     let provider = create_provider(&config)?;
+    let embed_model = effective_embedding_model(&config);
 
     health_check(&provider).await;
 
@@ -107,7 +110,7 @@ async fn main() -> anyhow::Result<()> {
         &config.memory.sqlite_path,
         &config.memory.qdrant_url,
         provider.clone(),
-        &config.llm.embedding_model,
+        &embed_model,
     )
     .await?;
 
@@ -116,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let all_meta = registry.all_meta();
-    let matcher = create_skill_matcher(&config, &provider, &all_meta, &memory).await;
+    let matcher = create_skill_matcher(&config, &provider, &all_meta, &memory, &embed_model).await;
     let skill_count = all_meta.len();
     if matcher.is_some() {
         tracing::info!("skill matcher initialized for {skill_count} skill(s)");
@@ -190,7 +193,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     #[cfg(feature = "mcp")]
-    let mcp_registry = create_mcp_registry(&config, &provider, &mcp_tools).await;
+    let mcp_registry = create_mcp_registry(&config, &provider, &mcp_tools, &embed_model).await;
 
     let agent = Agent::new(
         provider,
@@ -200,7 +203,7 @@ async fn main() -> anyhow::Result<()> {
         config.skills.max_active_skills,
         tool_executor,
     )
-    .with_embedding_model(config.llm.embedding_model.clone())
+    .with_embedding_model(embed_model.clone())
     .with_skill_reload(skill_paths, reload_rx)
     .with_memory(
         memory,
@@ -252,6 +255,7 @@ async fn create_skill_matcher(
     provider: &AnyProvider,
     meta: &[&SkillMeta],
     memory: &SemanticMemory<AnyProvider>,
+    embedding_model: &str,
 ) -> Option<SkillMatcherBackend> {
     let p = provider.clone();
     let embed_fn = move |text: &str| -> zeph_skills::matcher::EmbedFuture {
@@ -262,7 +266,7 @@ async fn create_skill_matcher(
 
     if config.memory.semantic.enabled && memory.has_qdrant() {
         match QdrantSkillMatcher::new(&config.memory.qdrant_url) {
-            Ok(mut qm) => match qm.sync(meta, &config.llm.embedding_model, &embed_fn).await {
+            Ok(mut qm) => match qm.sync(meta, embedding_model, &embed_fn).await {
                 Ok(_) => return Some(SkillMatcherBackend::Qdrant(qm)),
                 Err(e) => {
                     tracing::warn!("Qdrant skill sync failed, falling back to in-memory: {e:#}");
@@ -277,6 +281,41 @@ async fn create_skill_matcher(
     SkillMatcher::new(meta, &embed_fn)
         .await
         .map(SkillMatcherBackend::InMemory)
+}
+
+fn effective_embedding_model(config: &Config) -> String {
+    match config.llm.provider.as_str() {
+        #[cfg(feature = "openai")]
+        "openai" => {
+            if let Some(m) = config
+                .llm
+                .openai
+                .as_ref()
+                .and_then(|o| o.embedding_model.clone())
+            {
+                return m;
+            }
+        }
+        #[cfg(feature = "orchestrator")]
+        "orchestrator" => {
+            if let Some(orch) = &config.llm.orchestrator
+                && let Some(pcfg) = orch.providers.get(&orch.embed)
+            {
+                #[cfg(feature = "openai")]
+                if pcfg.provider_type == "openai"
+                    && let Some(m) = config
+                        .llm
+                        .openai
+                        .as_ref()
+                        .and_then(|o| o.embedding_model.clone())
+                {
+                    return m;
+                }
+            }
+        }
+        _ => {}
+    }
+    config.llm.embedding_model.clone()
 }
 
 fn create_provider(config: &Config) -> anyhow::Result<AnyProvider> {
@@ -306,6 +345,32 @@ fn create_provider(config: &Config) -> anyhow::Result<AnyProvider> {
 
             let provider = ClaudeProvider::new(api_key, cloud.model.clone(), cloud.max_tokens);
             Ok(AnyProvider::Claude(provider))
+        }
+        #[cfg(feature = "openai")]
+        "openai" => {
+            let openai_cfg = config
+                .llm
+                .openai
+                .as_ref()
+                .context("llm.openai config section required for OpenAI provider")?;
+
+            let api_key = config
+                .secrets
+                .openai_api_key
+                .as_ref()
+                .context("ZEPH_OPENAI_API_KEY not found in vault")?
+                .expose()
+                .to_owned();
+
+            let provider = OpenAiProvider::new(
+                api_key,
+                openai_cfg.base_url.clone(),
+                openai_cfg.model.clone(),
+                openai_cfg.max_tokens,
+                openai_cfg.embedding_model.clone(),
+                openai_cfg.reasoning_effort.clone(),
+            );
+            Ok(AnyProvider::OpenAi(provider))
         }
         #[cfg(feature = "candle")]
         "candle" => {
@@ -461,6 +526,7 @@ async fn create_mcp_registry(
     config: &Config,
     provider: &AnyProvider,
     mcp_tools: &[zeph_mcp::McpTool],
+    embedding_model: &str,
 ) -> Option<zeph_mcp::McpToolRegistry> {
     if !config.memory.semantic.enabled {
         return None;
@@ -473,10 +539,7 @@ async fn create_mcp_registry(
                 let p = p.clone();
                 Box::pin(async move { p.embed(&owned).await })
             };
-            if let Err(e) = reg
-                .sync(mcp_tools, &config.llm.embedding_model, &embed_fn)
-                .await
-            {
+            if let Err(e) = reg.sync(mcp_tools, embedding_model, &embed_fn).await {
                 tracing::warn!("MCP tool embedding sync failed: {e:#}");
             }
             Some(reg)
@@ -519,6 +582,7 @@ fn select_device(preference: &str) -> anyhow::Result<zeph_llm::candle_provider::
 }
 
 #[cfg(feature = "orchestrator")]
+#[allow(clippy::too_many_lines)]
 fn build_orchestrator(
     config: &Config,
 ) -> anyhow::Result<zeph_llm::orchestrator::ModelOrchestrator> {
@@ -560,6 +624,30 @@ fn build_orchestrator(
                     api_key,
                     model.to_owned(),
                     cloud.max_tokens,
+                ))
+            }
+            #[cfg(feature = "openai")]
+            "openai" => {
+                let openai_cfg = config
+                    .llm
+                    .openai
+                    .as_ref()
+                    .context("llm.openai config required for openai sub-provider")?;
+                let api_key = config
+                    .secrets
+                    .openai_api_key
+                    .as_ref()
+                    .context("ZEPH_OPENAI_API_KEY required for openai sub-provider")?
+                    .expose()
+                    .to_owned();
+                let model = pcfg.model.as_deref().unwrap_or(&openai_cfg.model);
+                SubProvider::OpenAi(OpenAiProvider::new(
+                    api_key,
+                    openai_cfg.base_url.clone(),
+                    model.to_owned(),
+                    openai_cfg.max_tokens,
+                    openai_cfg.embedding_model.clone(),
+                    openai_cfg.reasoning_effort.clone(),
                 ))
             }
             #[cfg(feature = "candle")]
@@ -1085,7 +1173,7 @@ mod tests {
         ));
 
         let mcp_tools = vec![];
-        let registry = create_mcp_registry(&config, &provider, &mcp_tools).await;
+        let registry = create_mcp_registry(&config, &provider, &mcp_tools, "test-model").await;
         assert!(registry.is_none());
     }
 
@@ -1222,7 +1310,7 @@ mod tests {
         .unwrap();
 
         let meta: Vec<&SkillMeta> = vec![];
-        let result = create_skill_matcher(&config, &provider, &meta, &memory).await;
+        let result = create_skill_matcher(&config, &provider, &meta, &memory, "test-model").await;
         assert!(result.is_none());
 
         let _ = std::fs::remove_file(&tmp);
@@ -1440,5 +1528,80 @@ mod tests {
 
         let result = build_orchestrator(&config);
         assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn create_provider_openai_missing_config_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "openai".into();
+        config.llm.openai = None;
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("llm.openai config section required")
+        );
+    }
+
+    #[test]
+    fn effective_embedding_model_defaults_to_llm() {
+        let config = Config::load(Path::new("/nonexistent")).unwrap();
+        assert_eq!(effective_embedding_model(&config), "qwen3-embedding");
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn effective_embedding_model_uses_openai_when_set() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "openai".into();
+        config.llm.openai = Some(zeph_core::config::OpenAiConfig {
+            base_url: "https://api.openai.com/v1".into(),
+            model: "gpt-5.2".into(),
+            max_tokens: 4096,
+            embedding_model: Some("text-embedding-3-small".into()),
+            reasoning_effort: None,
+        });
+        assert_eq!(effective_embedding_model(&config), "text-embedding-3-small");
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn effective_embedding_model_falls_back_when_openai_embed_missing() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "openai".into();
+        config.llm.openai = Some(zeph_core::config::OpenAiConfig {
+            base_url: "https://api.openai.com/v1".into(),
+            model: "gpt-5.2".into(),
+            max_tokens: 4096,
+            embedding_model: None,
+            reasoning_effort: None,
+        });
+        assert_eq!(effective_embedding_model(&config), "qwen3-embedding");
+    }
+
+    #[cfg(feature = "openai")]
+    #[test]
+    fn create_provider_openai_missing_api_key_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "openai".into();
+        config.llm.openai = Some(zeph_core::config::OpenAiConfig {
+            base_url: "https://api.openai.com/v1".into(),
+            model: "gpt-4o".into(),
+            max_tokens: 4096,
+            embedding_model: None,
+            reasoning_effort: None,
+        });
+        config.secrets.openai_api_key = None;
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ZEPH_OPENAI_API_KEY not found")
+        );
     }
 }

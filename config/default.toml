@@ -18,6 +18,14 @@ model = "claude-sonnet-4-5-20250929"
 # Maximum tokens for Claude responses
 max_tokens = 4096
 
+# OpenAI-compatible API (GPT-5.2, Together, Groq, Fireworks, etc.)
+# [llm.openai]
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-5.2"
+# max_tokens = 4096
+# embedding_model = "text-embedding-3-small"
+# reasoning_effort = "medium"  # low, medium, high (for reasoning models)
+
 # Candle local inference (enabled by default, disable with --no-default-features)
 # [llm.candle]
 # source = "huggingface"  # "local" or "huggingface"
