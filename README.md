@@ -7,7 +7,7 @@
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Lightweight AI agent with hybrid inference (Ollama / Claude / OpenAI / HuggingFace via candle), skills-first architecture, semantic memory with Qdrant, MCP client, A2A protocol support, multi-model orchestration, self-learning skill evolution, and multi-channel I/O. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
+Lightweight AI agent with hybrid inference (Ollama / Claude / OpenAI / HuggingFace via candle), skills-first architecture, semantic memory with Qdrant, MCP client, A2A protocol support, multi-model orchestration, self-learning skill evolution, and multi-channel I/O. Only relevant skills and MCP tools are injected into each prompt via vector similarity — keeping token usage minimal regardless of how many are installed. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
 
 <div align="center">
   <img src="asset/zeph-logo.png" alt="Zeph" width="600">
@@ -218,7 +218,7 @@ rate_limit = 60
 
 ## Skills
 
-Zeph uses an embedding-based skill system with progressive loading: only metadata is loaded at startup, skill bodies are deferred until activation, and resource files are resolved on demand.
+Zeph uses an embedding-based skill system that dramatically reduces token consumption: instead of injecting all skills into every prompt, only the top-K most relevant (default: 5) are selected per query via cosine similarity of vector embeddings. Combined with progressive loading (metadata at startup, bodies on activation, resources on demand), this keeps prompt size constant regardless of how many skills are installed.
 
 Eleven bundled skills: `web-search`, `web-scrape`, `file-ops`, `system-info`, `git`, `docker`, `api-request`, `setup-guide`, `skill-audit`, `skill-creator`, `mcp-generate`. Use `/skills` in chat to list available skills with usage statistics.
 
@@ -258,7 +258,7 @@ Extended frontmatter fields: `compatibility`, `license`, `metadata` (arbitrary k
 
 **Progressive loading:** Only metadata (~100 tokens per skill) is loaded at startup for embedding and matching. Full body (<5000 tokens) is loaded lazily on first activation and cached via `OnceLock`. Resource files in `scripts/`, `references/`, `assets/` are loaded on demand with path traversal protection.
 
-**Embedding-based matching:** Per query, only the top-K most relevant skills (default: 5) are selected via cosine similarity of embeddings and injected into the system prompt. Configure with `skills.max_active_skills` or `ZEPH_SKILLS_MAX_ACTIVE`.
+**Embedding-based matching:** Per query, only the top-K most relevant skills (default: 5) are selected via cosine similarity of embeddings and injected into the system prompt. With 50+ skills installed, a typical prompt still contains only 5 — saving thousands of tokens per request compared to naive full-injection approaches. Configure with `skills.max_active_skills` or `ZEPH_SKILLS_MAX_ACTIVE`.
 
 **Hot-reload:** SKILL.md file changes are detected via filesystem watcher (500ms debounce) and re-embedded without restart. Cached bodies are invalidated on reload.
 
@@ -716,7 +716,7 @@ Task classification uses keyword heuristics. Fallback chains try providers in or
 
 ## MCP Integration (Optional)
 
-Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Tools are discovered, embedded, and matched alongside skills using the same cosine similarity pipeline.
+Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Tools are discovered, embedded, and matched alongside skills using the same cosine similarity pipeline — only relevant MCP tools are injected into the prompt, so adding more servers does not inflate token usage.
 
 ```bash
 cargo build --release --features mcp
@@ -737,7 +737,7 @@ command = "npx"
 args = ["-y", "@anthropic/mcp-github"]
 ```
 
-MCP tools are embedded in Qdrant (`zeph_mcp_tools` collection) with BLAKE3 content-hash delta sync. Unified matching injects both skills and MCP tools into the system prompt by relevance score.
+MCP tools are embedded in Qdrant (`zeph_mcp_tools` collection) with BLAKE3 content-hash delta sync. Unified matching injects both skills and MCP tools into the system prompt by relevance score — keeping prompt size O(K) instead of O(N) where N is total tools across all servers.
 
 </details>
 
