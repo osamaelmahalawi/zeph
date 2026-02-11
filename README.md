@@ -1,17 +1,27 @@
 # Zeph
 
+[![CI](https://img.shields.io/github/actions/workflow/status/bug-ops/zeph/ci.yml?branch=main&label=CI)](https://github.com/bug-ops/zeph/actions)
 [![codecov](https://codecov.io/gh/bug-ops/zeph/graph/badge.svg?token=S5O0GR9U6G)](https://codecov.io/gh/bug-ops/zeph)
-[![Security](https://img.shields.io/badge/security-hardened-brightgreen)](SECURITY.md)
 [![Trivy Scan](https://img.shields.io/badge/Trivy-0%20CVEs-success)](https://github.com/bug-ops/zeph/security)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-blue)
 [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue)](https://www.rust-lang.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Lightweight AI agent with hybrid inference (Ollama / Claude / OpenAI / HuggingFace via candle), skills-first architecture, semantic memory with Qdrant, MCP client, A2A protocol support, multi-model orchestration, self-learning skill evolution, and multi-channel I/O. Only relevant skills and MCP tools are injected into each prompt via vector similarity — keeping token usage minimal regardless of how many are installed. **Cross-platform**: Linux, macOS, Windows (x86_64 + ARM64).
+Lightweight AI agent that routes tasks across **Ollama, Claude, OpenAI, and HuggingFace** models — with semantic skill matching, vector memory, MCP tooling, and agent-to-agent communication. Ships as a single binary for Linux, macOS, and Windows.
 
 <div align="center">
   <img src="asset/zeph-logo.png" alt="Zeph" width="600">
 </div>
+
+## Why Zeph
+
+**Token-efficient by design.** Most agent frameworks inject every tool and instruction into every prompt. Zeph embeds skills and MCP tools as vectors, then selects only the top-K relevant ones per query via cosine similarity. Prompt size stays O(K) — not O(N) — regardless of how many capabilities are installed.
+
+**Run anywhere.** Local models via Ollama or Candle (GGUF with Metal/CUDA), cloud APIs (Claude, OpenAI, GPT-compatible endpoints like Together AI and Groq), or all of them at once through the multi-model orchestrator with automatic fallback chains.
+
+**Production-ready security.** Shell sandboxing with path restrictions, command filtering (12 blocked patterns), destructive command confirmation, secret redaction, audit logging, SSRF protection, and Trivy-scanned container images with 0 HIGH/CRITICAL CVEs.
+
+**Self-improving.** Skills evolve through failure detection, self-reflection, and LLM-generated improvements — with optional manual approval before activation.
 
 ## Installation
 
@@ -23,804 +33,114 @@ cd zeph
 cargo build --release
 ```
 
-The binary is produced at `target/release/zeph`.
-
 ### Pre-built binaries
 
-Download from [GitHub Releases](https://github.com/bug-ops/zeph/releases/latest):
-
-| Platform | Architecture | Download |
-|----------|-------------|----------|
-| Linux | x86_64 | `zeph-x86_64-unknown-linux-gnu.tar.gz` |
-| Linux | aarch64 | `zeph-aarch64-unknown-linux-gnu.tar.gz` |
-| macOS | x86_64 | `zeph-x86_64-apple-darwin.tar.gz` |
-| macOS | aarch64 | `zeph-aarch64-apple-darwin.tar.gz` |
-| Windows | x86_64 | `zeph-x86_64-pc-windows-msvc.zip` |
+Download from [GitHub Releases](https://github.com/bug-ops/zeph/releases/latest) for Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows (x86_64).
 
 ### Docker
-
-Pull the latest image from GitHub Container Registry:
 
 ```bash
 docker pull ghcr.io/bug-ops/zeph:latest
 ```
 
-Or use a specific version:
+Multi-platform images (linux/amd64, linux/arm64) scanned with Trivy in CI. See [Docker deployment guide](https://bug-ops.github.io/zeph/guide/docker.html) for GPU, Compose, and vault options.
+
+## Quick Start
 
 ```bash
-docker pull ghcr.io/bug-ops/zeph:v0.8.2
-```
+# Pull models for Ollama
+ollama pull mistral:7b
+ollama pull qwen3-embedding
 
-**Security:** Images are scanned with [Trivy](https://trivy.dev/) in CI/CD and use Oracle Linux 9 Slim base with **0 HIGH/CRITICAL CVEs**. Multi-platform: linux/amd64, linux/arm64.
-
-## Usage
-
-### CLI mode (default)
-
-**Unix (Linux/macOS):**
-```bash
+# Run
 ./target/release/zeph
 ```
 
-**Windows:**
-```powershell
-.\target\release\zeph.exe
-```
+For Telegram bot mode:
 
-Type messages at the `You:` prompt. Type `exit`, `quit`, or press Ctrl-D to stop.
-
-### Telegram mode
-
-**Unix (Linux/macOS):**
 ```bash
 ZEPH_TELEGRAM_TOKEN="123:ABC" ./target/release/zeph
 ```
 
-**Windows:**
-```powershell
-$env:ZEPH_TELEGRAM_TOKEN="123:ABC"; .\target\release\zeph.exe
-```
-
-**Tip:** Restrict access by setting `telegram.allowed_users` in the config file.
-
-## Configuration
-
-**Note:** When using Ollama, ensure both the LLM model and embedding model are pulled:
-```bash
-ollama pull mistral:7b
-ollama pull qwen3-embedding
-```
-The default configuration uses `mistral:7b` for text generation and `qwen3-embedding` for vector embeddings.
-
-<details>
-<summary><b>📝 Configuration File</b> (click to expand)</summary>
-
-Zeph loads `config/default.toml` at startup and applies environment variable overrides.
-
-```toml
-[agent]
-name = "Zeph"
-
-[llm]
-provider = "ollama"
-base_url = "http://localhost:11434"
-model = "mistral:7b"
-embedding_model = "qwen3-embedding"  # Model for text embeddings
-
-[llm.cloud]
-model = "claude-sonnet-4-5-20250929"
-max_tokens = 4096
-
-# [llm.openai]
-# base_url = "https://api.openai.com/v1"
-# model = "gpt-5.2"
-# max_tokens = 4096
-# embedding_model = "text-embedding-3-small"
-# reasoning_effort = "medium"  # low, medium, high (for reasoning models)
-
-[skills]
-paths = ["./skills"]
-max_active_skills = 5  # Top-K skills per query via embedding similarity
-
-[memory]
-sqlite_path = "./data/zeph.db"
-history_limit = 50
-summarization_threshold = 100  # Trigger summarization after N messages
-context_budget_tokens = 0      # 0 = unlimited (proportional split: 15% summaries, 25% recall, 60% recent)
-
-[memory.semantic]
-enabled = false               # Enable semantic search via Qdrant
-recall_limit = 5              # Number of semantically relevant messages to inject
-
-[tools]
-enabled = true
-
-[tools.shell]
-timeout = 30
-blocked_commands = []
-allowed_commands = []
-allowed_paths = []          # Directories shell can access (empty = cwd only)
-allow_network = true        # false blocks curl/wget/nc
-confirm_patterns = ["rm ", "git push -f", "git push --force", "drop table", "drop database", "truncate "]
-
-[tools.scrape]
-timeout = 15
-max_body_bytes = 1048576  # 1MB
-
-[tools.audit]
-enabled = false             # Structured JSON audit log for tool executions
-destination = "stdout"      # "stdout" or file path
-
-[security]
-redact_secrets = true       # Redact API keys/tokens in LLM responses
-
-[timeouts]
-llm_seconds = 120           # LLM chat completion timeout
-embedding_seconds = 30      # Embedding generation timeout
-a2a_seconds = 30            # A2A remote call timeout
-
-[vault]
-backend = "env"  # "env" (default) or "age"
-
-[a2a]
-enabled = false
-host = "0.0.0.0"
-port = 8080
-# public_url = "https://agent.example.com"
-# auth_token = "secret"
-rate_limit = 60
-```
-
-</details>
-
-> [!IMPORTANT]
-> Shell commands are sandboxed with path restrictions, network control, and destructive command confirmation. See [Security](#security) for details.
-
-<details>
-<summary><b>🔧 Environment Variables</b> (click to expand)</summary>
-
-| Variable | Description |
-|----------|-------------|
-| `ZEPH_LLM_PROVIDER` | `ollama`, `claude`, `openai`, `candle`, or `orchestrator` |
-| `ZEPH_LLM_BASE_URL` | Ollama API endpoint |
-| `ZEPH_LLM_MODEL` | Model name for Ollama |
-| `ZEPH_LLM_EMBEDDING_MODEL` | Embedding model for Ollama (default: `qwen3-embedding`) |
-| `ZEPH_CLAUDE_API_KEY` | Anthropic API key (required for Claude) |
-| `ZEPH_OPENAI_API_KEY` | OpenAI API key (required for OpenAI provider) |
-| `ZEPH_TELEGRAM_TOKEN` | Telegram bot token (enables Telegram mode) |
-| `ZEPH_SQLITE_PATH` | SQLite database path |
-| `ZEPH_QDRANT_URL` | Qdrant server URL (default: `http://localhost:6334`) |
-| `ZEPH_MEMORY_SUMMARIZATION_THRESHOLD` | Trigger summarization after N messages (default: 100) |
-| `ZEPH_MEMORY_CONTEXT_BUDGET_TOKENS` | Context budget for proportional token allocation (default: 0 = unlimited) |
-| `ZEPH_SKILLS_MAX_ACTIVE` | Max skills per query via embedding match (default: 5) |
-| `ZEPH_TOOLS_TIMEOUT` | Shell command timeout in seconds (default: 30) |
-| `ZEPH_TOOLS_SCRAPE_TIMEOUT` | Web scrape request timeout in seconds (default: 15) |
-| `ZEPH_TOOLS_SCRAPE_MAX_BODY` | Max response body size in bytes (default: 1048576) |
-| `ZEPH_A2A_ENABLED` | Enable A2A server (default: false) |
-| `ZEPH_A2A_HOST` | A2A server bind address (default: `0.0.0.0`) |
-| `ZEPH_A2A_PORT` | A2A server port (default: `8080`) |
-| `ZEPH_A2A_PUBLIC_URL` | Public URL for agent card discovery |
-| `ZEPH_A2A_AUTH_TOKEN` | Bearer token for A2A server authentication |
-| `ZEPH_A2A_RATE_LIMIT` | Max requests per IP per minute (default: 60) |
-| `ZEPH_A2A_REQUIRE_TLS` | Require HTTPS for outbound A2A connections (default: true) |
-| `ZEPH_A2A_SSRF_PROTECTION` | Block private/loopback IPs in A2A client (default: true) |
-| `ZEPH_A2A_MAX_BODY_SIZE` | Max request body size in bytes (default: 1048576) |
-| `ZEPH_TOOLS_SHELL_ALLOWED_PATHS` | Comma-separated directories shell can access (empty = cwd) |
-| `ZEPH_TOOLS_SHELL_ALLOW_NETWORK` | Allow network commands from shell (default: true) |
-| `ZEPH_TOOLS_AUDIT_ENABLED` | Enable audit logging for tool executions (default: false) |
-| `ZEPH_TOOLS_AUDIT_DESTINATION` | Audit log destination: `stdout` or file path |
-| `ZEPH_SECURITY_REDACT_SECRETS` | Redact secrets in LLM responses (default: true) |
-| `ZEPH_TIMEOUT_LLM` | LLM call timeout in seconds (default: 120) |
-| `ZEPH_TIMEOUT_EMBEDDING` | Embedding generation timeout in seconds (default: 30) |
-| `ZEPH_TIMEOUT_A2A` | A2A remote call timeout in seconds (default: 30) |
-
-</details>
-
-## Skills
-
-Zeph uses an embedding-based skill system that dramatically reduces token consumption: instead of injecting all skills into every prompt, only the top-K most relevant (default: 5) are selected per query via cosine similarity of vector embeddings. Combined with progressive loading (metadata at startup, bodies on activation, resources on demand), this keeps prompt size constant regardless of how many skills are installed.
-
-Eleven bundled skills: `web-search`, `web-scrape`, `file-ops`, `system-info`, `git`, `docker`, `api-request`, `setup-guide`, `skill-audit`, `skill-creator`, `mcp-generate`. Use `/skills` in chat to list available skills with usage statistics.
-
-<details>
-<summary><b>🛠️ Skills System</b> (click to expand)</summary>
-
-Drop `SKILL.md` files into subdirectories under `skills/` to extend agent capabilities:
-
-```
-skills/
-  web-search/
-    SKILL.md
-    scripts/       # optional: executable scripts
-    references/    # optional: reference documents
-    assets/        # optional: static assets
-  git/
-    SKILL.md
-```
-
-`SKILL.md` format (per [agentskills.io](https://agentskills.io) spec):
-
-```markdown
----
-name: web-search
-description: Search the web for information.
-compatibility: requires curl
-license: MIT
-allowed-tools: shell, web-scrape
----
-# Instructions
-Use curl to fetch search results...
-```
-
-Extended frontmatter fields: `compatibility`, `license`, `metadata` (arbitrary key-value pairs), `allowed-tools`. Unknown keys are preserved in metadata for forward compatibility.
-
-**Name validation:** Skill names must be 1-64 characters, lowercase letters/numbers/hyphens only, no leading/trailing/consecutive hyphens, and must match the directory name.
-
-**Progressive loading:** Only metadata (~100 tokens per skill) is loaded at startup for embedding and matching. Full body (<5000 tokens) is loaded lazily on first activation and cached via `OnceLock`. Resource files in `scripts/`, `references/`, `assets/` are loaded on demand with path traversal protection.
-
-**Embedding-based matching:** Per query, only the top-K most relevant skills (default: 5) are selected via cosine similarity of embeddings and injected into the system prompt. With 50+ skills installed, a typical prompt still contains only 5 — saving thousands of tokens per request compared to naive full-injection approaches. Configure with `skills.max_active_skills` or `ZEPH_SKILLS_MAX_ACTIVE`.
-
-**Hot-reload:** SKILL.md file changes are detected via filesystem watcher (500ms debounce) and re-embedded without restart. Cached bodies are invalidated on reload.
-
-**Priority:** When multiple `skills.paths` contain a skill with the same name, the first path takes precedence.
-
-**Usage tracking:** Per-skill invocation counts and timestamps are stored in SQLite. View with the `/skills` chat command.
-
-</details>
-
-## Semantic Memory (Optional)
-
-Enable semantic search to retrieve contextually relevant messages from conversation history using vector similarity.
-
-**Note:** Requires Ollama with an embedding model (e.g., `qwen3-embedding`). Claude API does not support embeddings natively.
-
-<details>
-<summary><b>🧠 Semantic Memory with Qdrant</b> (click to expand)</summary>
-
-Zeph supports optional integration with [Qdrant](https://qdrant.tech/) for semantic memory:
-
-1. **Start Qdrant:**
-
-   ```bash
-   docker compose up -d qdrant
-   ```
-
-2. **Enable semantic memory in config:**
-
-   ```toml
-   [memory.semantic]
-   enabled = true
-   recall_limit = 5
-   ```
-
-3. **Automatic setup:** Qdrant collection (`zeph_conversations`) is created automatically on first use with correct vector dimensions (896 for `qwen3-embedding`) and Cosine distance metric. No manual initialization required.
-
-4. **Automatic embedding:** Messages are embedded asynchronously using the configured `embedding_model` and stored in Qdrant alongside SQLite.
-
-5. **Semantic recall:** Context builder injects semantically relevant messages from full history, not just recent messages.
-
-6. **Graceful degradation:** If Qdrant is unavailable, Zeph falls back to SQLite-only mode (recency-based history).
-
-</details>
-
-## Conversation Summarization (Optional)
-
-Automatically compress long conversation histories using LLM-based summarization to stay within context budget limits.
-
-> [!IMPORTANT]
-> Requires an LLM provider (Ollama or Claude). Set `context_budget_tokens = 0` to disable proportional allocation and use unlimited context.
-
-<details>
-<summary><b>📝 Automatic Conversation Summarization</b> (click to expand)</summary>
-
-Zeph supports automatic conversation summarization:
-
-- Triggered when message count exceeds `summarization_threshold` (default: 100)
-- Summaries stored in SQLite with token estimates
-- Context builder allocates proportional token budget:
-  - 15% for summaries
-  - 25% for semantic recall (if enabled)
-  - 60% for recent message history
-
-Enable via configuration:
-
-```toml
-[memory]
-summarization_threshold = 100
-context_budget_tokens = 8000  # Set to LLM context window size (0 = unlimited)
-```
-
-</details>
-
-## Docker
-
-**Note:** Docker Compose automatically pulls the latest image from GitHub Container Registry. To use a specific version, set `ZEPH_IMAGE=ghcr.io/bug-ops/zeph:v0.8.2`.
-
-<details>
-<summary><b>🐳 Docker Deployment Options</b> (click to expand)</summary>
-
-### Quick Start (Ollama + Qdrant in containers)
+For cloud providers:
 
 ```bash
-# Pull Ollama models first
-docker compose --profile cpu run --rm ollama ollama pull mistral:7b
-docker compose --profile cpu run --rm ollama ollama pull qwen3-embedding
+# Claude
+ZEPH_LLM_PROVIDER=claude ZEPH_CLAUDE_API_KEY=sk-ant-... ./target/release/zeph
 
-# Start all services
-docker compose --profile cpu up
-```
-
-### Apple Silicon (Ollama on host with Metal GPU)
-
-```bash
-# Use Ollama on macOS host for Metal GPU acceleration
-ollama pull mistral:7b
-ollama pull qwen3-embedding
-ollama serve &
-
-# Start Zeph + Qdrant, connect to host Ollama
-ZEPH_LLM_BASE_URL=http://host.docker.internal:11434 docker compose up
-```
-
-### Linux with NVIDIA GPU
-
-```bash
-# Pull models first
-docker compose --profile gpu run --rm ollama ollama pull mistral:7b
-docker compose --profile gpu run --rm ollama ollama pull qwen3-embedding
-
-# Start all services with GPU
-docker compose --profile gpu -f docker-compose.yml -f docker-compose.gpu.yml up
-```
-
-### Age Vault (Encrypted Secrets)
-
-```bash
-# Mount key and vault files into container
-docker compose -f docker-compose.yml -f docker-compose.vault.yml up
-```
-
-Override file paths via environment variables:
-
-```bash
-ZEPH_VAULT_KEY=./my-key.txt ZEPH_VAULT_PATH=./my-secrets.age \
-  docker compose -f docker-compose.yml -f docker-compose.vault.yml up
-```
-
-> [!IMPORTANT]
-> The image must be built with `vault-age` feature enabled. For local builds, use `CARGO_FEATURES=vault-age` with `docker-compose.dev.yml` (see [Local Development](#local-development)).
-
-### Using Specific Version
-
-```bash
-# Use a specific release version
-ZEPH_IMAGE=ghcr.io/bug-ops/zeph:v0.8.2 docker compose up
-
-# Always pull latest
-docker compose pull && docker compose up
-```
-
-### Local Development
-
-Full stack with debug tracing (builds from source via `Dockerfile.dev`, uses host Ollama via `host.docker.internal`):
-
-```bash
-# Build and start Qdrant + Zeph with debug logging
-docker compose -f docker-compose.dev.yml up --build
-
-# Build with optional features (e.g. vault-age, candle)
-CARGO_FEATURES=vault-age docker compose -f docker-compose.dev.yml up --build
-
-# Build with vault-age and mount vault files
-CARGO_FEATURES=vault-age \
-  docker compose -f docker-compose.dev.yml -f docker-compose.vault.yml up --build
-```
-
-Dependencies only (run zeph natively on host):
-
-```bash
-# Start Qdrant
-docker compose -f docker-compose.deps.yml up
-
-# Run zeph natively with debug tracing
-RUST_LOG=zeph=debug,zeph_channels=trace cargo run
-```
-
-</details>
-
-## Security
-
-Zeph implements defense-in-depth security for safe AI agent operations in production environments.
-
-### Shell Command Filtering
-
-> [!WARNING]
-> All shell commands from LLM responses pass through a security filter before execution. Commands matching blocked patterns are rejected with detailed error messages.
-
-**12 blocked patterns by default:**
-
-| Pattern | Risk Category | Examples |
-|---------|---------------|----------|
-| `rm -rf /`, `rm -rf /*` | Filesystem destruction | Prevents accidental system wipe |
-| `sudo`, `su` | Privilege escalation | Blocks unauthorized root access |
-| `mkfs`, `fdisk` | Filesystem operations | Prevents disk formatting |
-| `dd if=`, `dd of=` | Low-level disk I/O | Blocks dangerous write operations |
-| `curl \| bash`, `wget \| sh` | Arbitrary code execution | Prevents remote code injection |
-| `nc`, `ncat`, `netcat` | Network backdoors | Blocks reverse shell attempts |
-| `shutdown`, `reboot`, `halt` | System control | Prevents service disruption |
-
-**Configuration:**
-```toml
-[tools.shell]
-timeout = 30
-blocked_commands = ["custom_pattern"]  # Additional patterns (additive to defaults)
-allowed_paths = ["/home/user/workspace"]  # Restrict filesystem access
-allow_network = true  # false blocks curl/wget/nc
-confirm_patterns = ["rm ", "git push -f"]  # Destructive command patterns
-```
-
-> [!IMPORTANT]
-> Custom blocked patterns are **additive** — you cannot weaken default security. Matching is case-insensitive.
-
-### Shell Sandbox
-
-Commands are validated against a configurable filesystem allowlist before execution:
-
-- `allowed_paths = []` (default) restricts access to the working directory only
-- Paths are canonicalized to prevent traversal attacks (`../../etc/passwd`)
-- `allow_network = false` blocks network tools (`curl`, `wget`, `nc`, `ncat`, `netcat`)
-
-### Destructive Command Confirmation
-
-Commands matching `confirm_patterns` trigger an interactive confirmation before execution:
-
-- **CLI:** `y/N` prompt on stdin
-- **Telegram:** inline keyboard with Confirm/Cancel buttons
-- Default patterns: `rm`, `git push -f`, `git push --force`, `drop table`, `drop database`, `truncate`
-- Configurable via `tools.shell.confirm_patterns` in TOML
-
-### Audit Logging
-
-Structured JSON audit log for all tool executions:
-
-```toml
-[tools.audit]
-enabled = true
-destination = "./data/audit.jsonl"  # or "stdout"
-```
-
-Each entry includes timestamp, tool name, command, result (success/blocked/error/timeout), and duration in milliseconds.
-
-### Secret Redaction
-
-LLM responses are scanned for common secret patterns before display:
-
-- Detected patterns: `sk-`, `AKIA`, `ghp_`, `gho_`, `xoxb-`, `xoxp-`, `sk_live_`, `sk_test_`, `-----BEGIN`
-- Secrets replaced with `[REDACTED]` preserving original whitespace formatting
-- Enabled by default (`security.redact_secrets = true`), applied to both streaming and non-streaming responses
-
-### Timeout Policies
-
-Configurable per-operation timeouts prevent hung connections:
-
-```toml
-[timeouts]
-llm_seconds = 120       # LLM chat completion
-embedding_seconds = 30  # Embedding generation
-a2a_seconds = 30        # A2A remote calls
-```
-
-### A2A Network Security
-
-- **TLS enforcement:** `a2a.require_tls = true` rejects HTTP endpoints (HTTPS only)
-- **SSRF protection:** `a2a.ssrf_protection = true` blocks private IP ranges (RFC 1918, loopback, link-local) via DNS resolution
-- **Payload limits:** `a2a.max_body_size` caps request body (default: 1 MiB)
-
-**Safe execution model:**
-- Commands parsed for blocked patterns, then sandbox-validated, then confirmation-checked
-- Timeout enforcement (default: 30s, configurable)
-- Full errors logged to system, sanitized messages shown to users
-- Audit trail for all tool executions (when enabled)
-
-### Container Security
-
-Docker images follow security best practices:
-
-| Security Layer | Implementation | Status |
-|----------------|----------------|--------|
-| **Base image** | Oracle Linux 9 Slim | Production-hardened |
-| **Vulnerability scanning** | Trivy in CI/CD | **0 HIGH/CRITICAL CVEs** |
-| **User privileges** | Non-root `zeph` user (UID 1000) | ✅ Enforced |
-| **Attack surface** | Minimal package installation | Distroless-style |
-| **Image signing** | Coming soon (issue #TBD) | 🚧 Planned |
-
-**Continuous security:**
-- Every release scanned with [Trivy](https://trivy.dev/) before publishing
-- Automated Dependabot PRs for dependency updates
-- `cargo-deny` checks in CI for license/vulnerability compliance
-
-### Code Security
-
-Rust-native memory safety guarantees:
-
-- **Minimal `unsafe`:** One audited `unsafe` block behind `candle` feature flag (memory-mapped safetensors loading). Core crates enforce `#![deny(unsafe_code)]`
-- **No panic in production:** `unwrap()` and `expect()` linted via clippy
-- **Secure dependencies:** All crates audited with `cargo-deny`
-- **MSRV policy:** Rust 1.88+ (Edition 2024) for latest security patches
-
-### Secrets Management
-
-> [!CAUTION]
-> Never commit secrets to version control. Use environment variables or age-encrypted vault files.
-
-Zeph resolves secrets (`ZEPH_CLAUDE_API_KEY`, `ZEPH_TELEGRAM_TOKEN`, `ZEPH_A2A_AUTH_TOKEN`) through a pluggable `VaultProvider` with redacted debug output via the `Secret` newtype.
-
-**Backends:**
-
-| Backend | Description | Activation |
-|---------|-------------|------------|
-| `env` (default) | Read secrets from environment variables | `--vault env` or omit |
-| `age` | Decrypt age-encrypted JSON vault file at startup | `--vault age --vault-key <identity> --vault-path <vault.age>` |
-
-**Age vault workflow:**
-
-```bash
-# Generate an age identity key
-age-keygen -o key.txt
-
-# Create a JSON secrets file and encrypt it
-echo '{"ZEPH_CLAUDE_API_KEY":"sk-...","ZEPH_TELEGRAM_TOKEN":"123:ABC"}' | \
-  age -r $(grep 'public key' key.txt | awk '{print $NF}') -o secrets.age
-
-# Run with age vault
-cargo build --release --features vault-age
-./target/release/zeph --vault age --vault-key key.txt --vault-path secrets.age
-```
-
-> [!TIP]
-> The `vault-age` feature flag is disabled by default for zero build-time cost. Enable it only when age vault support is needed.
-
-### Reporting Security Issues
-
-Found a vulnerability? See [SECURITY.md](SECURITY.md) for responsible disclosure process.
-
-**Security contact:** Submit via GitHub Security Advisories (confidential)
-
-## A2A Server (Optional)
-
-Zeph includes an embedded [A2A protocol](https://github.com/a2aproject/A2A) server for agent-to-agent communication. When enabled, other agents can discover and interact with Zeph via the standard A2A JSON-RPC 2.0 API.
-
-```bash
-ZEPH_A2A_ENABLED=true ZEPH_A2A_AUTH_TOKEN=secret ./target/release/zeph
-```
-
-The server exposes:
-- `/.well-known/agent-card.json` — agent discovery (public, no auth)
-- `/a2a` — JSON-RPC endpoint (`message/send`, `tasks/get`, `tasks/cancel`)
-- `/a2a/stream` — SSE streaming endpoint
-
-> [!TIP]
-> Set `ZEPH_A2A_AUTH_TOKEN` to secure the server with bearer token authentication. The agent card endpoint remains public per A2A spec.
-
-## OpenAI Provider
-
-Connect to OpenAI API or any OpenAI-compatible service (Together AI, Groq, Fireworks, Perplexity).
-
-```bash
+# OpenAI (or any compatible API)
 ZEPH_LLM_PROVIDER=openai ZEPH_OPENAI_API_KEY=sk-... ./target/release/zeph
 ```
 
-<details>
-<summary><b>OpenAI Configuration</b> (click to expand)</summary>
-
-```toml
-[llm]
-provider = "openai"
-
-[llm.openai]
-base_url = "https://api.openai.com/v1"
-model = "gpt-5.2"
-max_tokens = 4096
-embedding_model = "text-embedding-3-small"   # optional, enables vector embeddings
-reasoning_effort = "medium"                  # optional: low, medium, high (for o3, etc.)
-```
-
-Change `base_url` to point to any OpenAI-compatible API:
-
-```toml
-# Together AI
-base_url = "https://api.together.xyz/v1"
-
-# Groq
-base_url = "https://api.groq.com/openai/v1"
-
-# Fireworks
-base_url = "https://api.fireworks.ai/inference/v1"
-```
-
-</details>
-
 > [!TIP]
-> When `embedding_model` is set, Qdrant subsystems automatically use it for skill matching and semantic memory instead of the global `llm.embedding_model`.
+> Full configuration reference with TOML config and environment variables: [Configuration](https://bug-ops.github.io/zeph/getting-started/configuration.html)
 
-## Local Inference (Optional)
+## Key Features
 
-Run HuggingFace models locally via [candle](https://github.com/huggingface/candle) without external API dependencies. Supports GGUF quantized models with Metal/CUDA acceleration.
+| Feature | Description | Docs |
+|---------|-------------|------|
+| **Hybrid Inference** | Ollama, Claude, OpenAI, Candle (GGUF) — local, cloud, or both | [OpenAI](https://bug-ops.github.io/zeph/guide/openai.html) · [Candle](https://bug-ops.github.io/zeph/guide/candle.html) |
+| **Skills-First Architecture** | Embedding-based top-K matching, progressive loading, hot-reload | [Skills](https://bug-ops.github.io/zeph/guide/skills.html) |
+| **Semantic Memory** | SQLite + Qdrant vector search for contextual recall | [Memory](https://bug-ops.github.io/zeph/guide/semantic-memory.html) |
+| **MCP Client** | Connect external tool servers (stdio + HTTP), unified matching | [MCP](https://bug-ops.github.io/zeph/guide/mcp.html) |
+| **A2A Protocol** | Agent-to-agent communication via JSON-RPC 2.0 with SSE streaming | [A2A](https://bug-ops.github.io/zeph/guide/a2a.html) |
+| **Model Orchestrator** | Route tasks to different providers with fallback chains | [Orchestrator](https://bug-ops.github.io/zeph/guide/orchestrator.html) |
+| **Self-Learning** | Skills evolve via failure detection and LLM-generated improvements | [Self-Learning](https://bug-ops.github.io/zeph/guide/self-learning.html) |
+| **Multi-Channel I/O** | CLI and Telegram with streaming support | [Quick Start](https://bug-ops.github.io/zeph/getting-started/quick-start.html) |
+| **Defense-in-Depth** | Shell sandbox, command filter, secret redaction, audit log, SSRF protection | [Security](https://bug-ops.github.io/zeph/security.html) |
 
-```bash
-cargo build --release --features candle,metal  # macOS with Metal GPU
+## Architecture
+
+```
+zeph (binary)
+├── zeph-core       — agent loop, config, context builder
+├── zeph-llm        — LlmProvider: Ollama, Claude, OpenAI, Candle, orchestrator
+├── zeph-skills     — SKILL.md parser, embedding matcher, hot-reload, self-learning
+├── zeph-memory     — SQLite + Qdrant, semantic recall, summarization
+├── zeph-channels   — Telegram adapter (teloxide) with streaming
+├── zeph-tools      — shell executor, web scraper, composite tool dispatch
+├── zeph-mcp        — MCP client, multi-server lifecycle, unified tool matching
+└── zeph-a2a        — A2A client + server, agent discovery, JSON-RPC 2.0
 ```
 
-<details>
-<summary><b>Candle Configuration</b> (click to expand)</summary>
+> [!IMPORTANT]
+> Requires Rust 1.88+ (Edition 2024). Native async traits — no `async-trait` crate dependency.
 
-```toml
-[llm]
-provider = "candle"
-
-[llm.candle]
-source = "huggingface"
-repo_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
-filename = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-template = "mistral"              # llama3, chatml, mistral, phi3, raw
-embedding_repo = "sentence-transformers/all-MiniLM-L6-v2"  # optional BERT embeddings
-
-[llm.candle.generation]
-temperature = 0.7
-top_p = 0.9
-top_k = 40
-max_tokens = 2048
-repeat_penalty = 1.1
-```
-
-Supported chat templates: `llama3`, `chatml`, `mistral`, `phi3`, `raw`.
-
-Device auto-detection: Metal on macOS, CUDA on Linux with GPU, CPU fallback.
-
-</details>
-
-## Model Orchestrator (Optional)
-
-Route tasks to different LLM providers based on content classification. Each task type (coding, creative, analysis, translation, summarization, general) maps to a provider chain with automatic fallback.
-
-```bash
-cargo build --release --features candle,orchestrator
-```
-
-<details>
-<summary><b>Orchestrator Configuration</b> (click to expand)</summary>
-
-```toml
-[llm]
-provider = "orchestrator"
-
-[llm.orchestrator.providers.local]
-type = "candle"
-repo_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
-filename = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-template = "mistral"
-
-[llm.orchestrator.providers.cloud]
-type = "claude"
-
-[llm.orchestrator.routes]
-coding = ["local", "cloud"]       # try local first, fallback to cloud
-creative = ["cloud"]              # cloud only
-analysis = ["cloud", "local"]     # prefer cloud
-general = ["local"]               # local only
-```
-
-Task classification uses keyword heuristics. Fallback chains try providers in order until one succeeds.
-
-</details>
-
-## MCP Integration (Optional)
-
-Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io/) (MCP). Tools are discovered, embedded, and matched alongside skills using the same cosine similarity pipeline — only relevant MCP tools are injected into the prompt, so adding more servers does not inflate token usage.
-
-```bash
-cargo build --release --features mcp
-```
-
-<details>
-<summary><b>MCP Configuration</b> (click to expand)</summary>
-
-```toml
-[[mcp.servers]]
-name = "filesystem"
-command = "npx"
-args = ["-y", "@anthropic/mcp-filesystem"]
-
-[[mcp.servers]]
-name = "github"
-command = "npx"
-args = ["-y", "@anthropic/mcp-github"]
-```
-
-MCP tools are embedded in Qdrant (`zeph_mcp_tools` collection) with BLAKE3 content-hash delta sync. Unified matching injects both skills and MCP tools into the system prompt by relevance score — keeping prompt size O(K) instead of O(N) where N is total tools across all servers.
-
-</details>
-
-## Self-Learning Skills (Optional)
-
-Automatically improve skills based on execution outcomes. When a skill fails repeatedly, Zeph uses self-reflection and LLM-generated improvements to create better skill versions.
-
-```bash
-cargo build --release --features self-learning
-```
-
-<details>
-<summary><b>Self-Learning Configuration</b> (click to expand)</summary>
-
-```toml
-[skills.learning]
-enabled = true
-auto_activate = false     # require manual approval for new versions
-min_failures = 3          # failures before triggering improvement
-improve_threshold = 0.7   # success rate below which improvement starts
-rollback_threshold = 0.5  # auto-rollback when success rate drops below this
-min_evaluations = 5       # minimum evaluations before rollback decision
-max_versions = 10         # max auto-generated versions per skill
-cooldown_minutes = 60     # cooldown between improvements for same skill
-```
-
-**Chat commands:**
-- `/skill stats` — view skill execution metrics
-- `/skill versions` — list generated skill versions
-- `/skill activate <id>` — activate a specific version
-- `/skill approve <id>` — approve a pending version
-- `/skill reset <name>` — reset skill to original version
-- `/feedback` — provide explicit feedback on skill quality
-
-</details>
-
-> [!TIP]
-> Set `auto_activate = false` (default) to review and manually approve LLM-generated skill improvements before they go live.
+Deep dive: [Architecture overview](https://bug-ops.github.io/zeph/architecture/overview.html) · [Crate reference](https://bug-ops.github.io/zeph/architecture/crates.html) · [Token efficiency](https://bug-ops.github.io/zeph/architecture/token-efficiency.html)
 
 ## Feature Flags
 
 | Feature | Default | Description |
 |---------|---------|-------------|
-| `a2a` | Enabled | [A2A protocol](https://github.com/a2aproject/A2A) client and server for agent-to-agent communication |
-| `openai` | Enabled | OpenAI-compatible provider (GPT, Together, Groq, Fireworks, etc.) |
-| `mcp` | Enabled | MCP client for external tool servers via stdio/HTTP transport |
-| `candle` | Enabled | Local HuggingFace model inference via [candle](https://github.com/huggingface/candle) (GGUF quantized models) |
-| `orchestrator` | Enabled | Multi-model routing with task-based classification and fallback chains |
-| `self-learning` | Enabled | Skill evolution via failure detection, self-reflection, and LLM-generated improvements |
-| `vault-age` | Enabled | Age-encrypted vault backend for file-based secret storage ([age](https://age-encryption.org/)) |
-| `metal` | Disabled | Metal GPU acceleration for candle on macOS (implies `candle`) |
-| `cuda` | Disabled | CUDA GPU acceleration for candle on Linux (implies `candle`) |
-
-Build with specific features:
+| `a2a` | On | A2A protocol client and server |
+| `openai` | On | OpenAI-compatible provider |
+| `mcp` | On | MCP client for external tool servers |
+| `candle` | On | Local HuggingFace inference (GGUF) |
+| `orchestrator` | On | Multi-model routing with fallback |
+| `self-learning` | On | Skill evolution system |
+| `vault-age` | On | Age-encrypted secret storage |
+| `metal` | Off | Metal GPU acceleration (macOS) |
+| `cuda` | Off | CUDA GPU acceleration (Linux) |
 
 ```bash
-cargo build --release                                     # all default features
-cargo build --release --features metal                    # macOS with Metal GPU
-cargo build --release --features cuda                     # Linux with NVIDIA GPU
-cargo build --release --no-default-features               # minimal binary
+cargo build --release                        # all defaults
+cargo build --release --features metal       # macOS Metal GPU
+cargo build --release --no-default-features  # minimal binary
 ```
 
-## Architecture
+Full details: [Feature Flags](https://bug-ops.github.io/zeph/feature-flags.html)
 
-<details>
-<summary><b>🏗️ Project Structure</b> (click to expand)</summary>
+## Documentation
 
-```
-zeph (binary)
-├── zeph-core       Agent loop, config, channel trait, context builder
-├── zeph-llm        LlmProvider trait, Ollama + Claude + OpenAI + Candle backends, orchestrator, embeddings
-├── zeph-skills     SKILL.md parser, registry with lazy body loading, embedding matcher, resource resolver, hot-reload
-├── zeph-memory     SQLite + Qdrant, SemanticMemory orchestrator, summarization
-├── zeph-channels   Telegram adapter (teloxide) with streaming
-├── zeph-tools      ToolExecutor trait, ShellExecutor, WebScrapeExecutor, CompositeExecutor
-├── zeph-mcp        MCP client via rmcp, multi-server lifecycle, unified tool matching (optional)
-└── zeph-a2a        A2A protocol client + server, agent discovery, JSON-RPC 2.0 (optional)
-```
+Full documentation is available at **[bug-ops.github.io/zeph](https://bug-ops.github.io/zeph/)**.
 
-</details>
+## Contributing
 
-> [!IMPORTANT]
-> Requires Rust 1.88+ (Edition 2024). Native async traits are used throughout — no `async-trait` crate.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development workflow and guidelines.
+
+## Security
+
+Found a vulnerability? Do not open a public issue. Use [GitHub Security Advisories](https://github.com/bug-ops/zeph/security/advisories/new) for responsible disclosure.
 
 ## License
 
