@@ -491,4 +491,563 @@ mod tests {
         let provider = orch.select_provider(&user_msg("write code"));
         assert_eq!(provider.name(), "ollama");
     }
+
+    #[test]
+    fn orchestrator_missing_default_provider() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "test-embed".into(),
+            )),
+        );
+        let result =
+            ModelOrchestrator::new(HashMap::new(), providers, "missing".into(), "ollama".into());
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("default provider 'missing' not found")
+        );
+    }
+
+    #[test]
+    fn orchestrator_missing_embed_provider() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "test-embed".into(),
+            )),
+        );
+        let result =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "missing".into());
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("embed provider 'missing' not found")
+        );
+    }
+
+    #[test]
+    fn sub_provider_ollama_delegates() {
+        let sub = SubProvider::Ollama(OllamaProvider::new(
+            "http://localhost:11434",
+            "test".into(),
+            "embed".into(),
+        ));
+        assert_eq!(sub.name(), "ollama");
+        assert!(sub.supports_streaming());
+        assert!(sub.supports_embeddings());
+    }
+
+    #[test]
+    fn sub_provider_claude_delegates() {
+        let sub = SubProvider::Claude(ClaudeProvider::new(
+            "key".into(),
+            "claude-sonnet-4-5-20250929".into(),
+            1024,
+        ));
+        assert_eq!(sub.name(), "claude");
+        assert!(sub.supports_streaming());
+        assert!(!sub.supports_embeddings());
+    }
+
+    #[test]
+    fn sub_provider_debug() {
+        let sub = SubProvider::Ollama(OllamaProvider::new(
+            "http://localhost:11434",
+            "test".into(),
+            "embed".into(),
+        ));
+        let debug = format!("{sub:?}");
+        assert!(debug.contains("Ollama"));
+    }
+
+    #[test]
+    fn sub_provider_clone() {
+        let sub = SubProvider::Claude(ClaudeProvider::new("key".into(), "model".into(), 512));
+        let cloned = sub.clone();
+        assert_eq!(cloned.name(), sub.name());
+    }
+
+    #[test]
+    fn task_type_debug() {
+        let task = TaskType::Coding;
+        assert_eq!(format!("{task:?}"), "Coding");
+    }
+
+    #[test]
+    fn task_type_copy_and_eq() {
+        let a = TaskType::Creative;
+        let b = a;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn task_type_hash() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(TaskType::Coding);
+        set.insert(TaskType::Coding);
+        assert_eq!(set.len(), 1);
+    }
+
+    #[test]
+    fn classify_uses_last_user_message() {
+        let messages = vec![
+            Message {
+                role: Role::User,
+                content: "write a function".into(),
+            },
+            Message {
+                role: Role::Assistant,
+                content: "here it is".into(),
+            },
+            Message {
+                role: Role::User,
+                content: "translate to spanish".into(),
+            },
+        ];
+        assert_eq!(TaskType::classify(&messages), TaskType::Translation);
+    }
+
+    #[test]
+    fn classify_ignores_system_messages() {
+        let messages = vec![
+            Message {
+                role: Role::System,
+                content: "you write code".into(),
+            },
+            Message {
+                role: Role::User,
+                content: "hello there".into(),
+            },
+        ];
+        assert_eq!(TaskType::classify(&messages), TaskType::General);
+    }
+
+    #[test]
+    fn classify_code_indicators_comprehensive() {
+        for keyword in &[
+            "algorithm",
+            "refactor",
+            "compile",
+            "syntax",
+            "pub fn",
+            "```",
+        ] {
+            let msgs = user_msg(keyword);
+            assert_eq!(
+                TaskType::classify(&msgs),
+                TaskType::Coding,
+                "failed for: {keyword}"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_summary_indicators() {
+        assert_eq!(
+            TaskType::classify(&user_msg("give me a tl;dr")),
+            TaskType::Summarization
+        );
+        assert_eq!(
+            TaskType::classify(&user_msg("brief overview please")),
+            TaskType::Summarization
+        );
+    }
+
+    #[test]
+    fn classify_creative_indicators() {
+        assert_eq!(
+            TaskType::classify(&user_msg("imagine a world where")),
+            TaskType::Creative
+        );
+    }
+
+    #[test]
+    fn classify_analysis_indicators() {
+        assert_eq!(
+            TaskType::classify(&user_msg("evaluate this approach")),
+            TaskType::Analysis
+        );
+        assert_eq!(
+            TaskType::classify(&user_msg("pros and cons of X")),
+            TaskType::Analysis
+        );
+    }
+
+    #[test]
+    fn orchestrator_providers_accessor() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+        assert_eq!(orch.providers().len(), 1);
+        assert!(orch.providers().contains_key("ollama"));
+    }
+
+    #[test]
+    fn orchestrator_select_falls_back_to_default() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+        let provider = orch.select_provider(&user_msg("hello world"));
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    fn orchestrator_select_skips_missing_in_chain() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(
+            TaskType::General,
+            vec!["nonexistent".into(), "ollama".into()],
+        );
+        let orch =
+            ModelOrchestrator::new(routes, providers, "ollama".into(), "ollama".into()).unwrap();
+        let provider = orch.select_provider(&user_msg("hello"));
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    fn orchestrator_clone() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+        let cloned = orch.clone();
+        assert_eq!(cloned.name(), "orchestrator");
+        assert_eq!(cloned.providers().len(), 1);
+    }
+
+    #[test]
+    fn orchestrator_debug() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+        let debug = format!("{orch:?}");
+        assert!(debug.contains("ModelOrchestrator"));
+    }
+
+    #[test]
+    fn orchestrator_supports_streaming_delegates_to_default() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "claude".into(),
+            SubProvider::Claude(ClaudeProvider::new("key".into(), "model".into(), 1024)),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "claude".into(), "claude".into())
+                .unwrap();
+        assert!(orch.supports_streaming());
+    }
+
+    #[test]
+    fn orchestrator_supports_embeddings_delegates_to_embed_provider() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "claude".into(),
+            SubProvider::Claude(ClaudeProvider::new("key".into(), "model".into(), 1024)),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "claude".into(), "claude".into())
+                .unwrap();
+        assert!(!orch.supports_embeddings());
+    }
+
+    #[tokio::test]
+    async fn chat_with_fallback_single_provider_unreachable() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(TaskType::General, vec!["ollama".into()]);
+        let orch =
+            ModelOrchestrator::new(routes, providers, "ollama".into(), "ollama".into()).unwrap();
+
+        let result = orch.chat(&user_msg("hello")).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_with_fallback_falls_through_chain() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "bad".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        providers.insert(
+            "also-bad".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:2",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(TaskType::General, vec!["bad".into(), "also-bad".into()]);
+        let orch = ModelOrchestrator::new(routes, providers, "bad".into(), "bad".into()).unwrap();
+
+        let result = orch.chat(&user_msg("hello")).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_with_fallback_skips_missing_provider_in_chain() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(
+            TaskType::General,
+            vec!["nonexistent".into(), "ollama".into()],
+        );
+        let orch =
+            ModelOrchestrator::new(routes, providers, "ollama".into(), "ollama".into()).unwrap();
+
+        let result = orch.chat(&user_msg("hello")).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_with_fallback_no_route_configured() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+
+        let result = orch.chat(&user_msg("hello")).await;
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("no route configured")
+        );
+    }
+
+    #[tokio::test]
+    async fn stream_with_fallback_no_route_configured() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+
+        let result = orch.chat_stream(&user_msg("hello")).await;
+        match result {
+            Err(e) => assert!(e.to_string().contains("no route configured")),
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_with_fallback_all_fail() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "bad".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(TaskType::General, vec!["bad".into()]);
+        let orch = ModelOrchestrator::new(routes, providers, "bad".into(), "bad".into()).unwrap();
+
+        let result = orch.chat_stream(&user_msg("hello")).await;
+        assert!(matches!(result, Err(_)));
+    }
+
+    #[tokio::test]
+    async fn embed_delegates_to_embed_provider() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let orch =
+            ModelOrchestrator::new(HashMap::new(), providers, "ollama".into(), "ollama".into())
+                .unwrap();
+
+        let result = orch.embed("test text").await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn chat_with_fallback_uses_general_route_as_fallback() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://127.0.0.1:1",
+                "test".into(),
+                "test".into(),
+            )),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(TaskType::General, vec!["ollama".into()]);
+
+        let orch =
+            ModelOrchestrator::new(routes, providers, "ollama".into(), "ollama".into()).unwrap();
+
+        let result = orch.chat(&user_msg("write a function to sort")).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn classify_russian_translation_indicator() {
+        assert_eq!(
+            TaskType::classify(&user_msg("переведи на английский")),
+            TaskType::Translation
+        );
+    }
+
+    #[test]
+    fn classify_russian_summary_indicator() {
+        assert_eq!(
+            TaskType::classify(&user_msg("кратко опиши")),
+            TaskType::Summarization
+        );
+    }
+
+    #[test]
+    fn classify_russian_creative_indicator() {
+        assert_eq!(
+            TaskType::classify(&user_msg("сочини рассказ")),
+            TaskType::Creative
+        );
+    }
+
+    #[test]
+    fn classify_russian_analysis_indicator() {
+        assert_eq!(
+            TaskType::classify(&user_msg("анализ данных")),
+            TaskType::Analysis
+        );
+    }
+
+    #[test]
+    fn classify_code_with_backticks() {
+        assert_eq!(
+            TaskType::classify(&user_msg("here is some code ```rust let x = 5;```")),
+            TaskType::Coding
+        );
+    }
+
+    #[test]
+    fn orchestrator_select_uses_task_specific_route() {
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama".into(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+        providers.insert(
+            "claude".into(),
+            SubProvider::Claude(ClaudeProvider::new("key".into(), "model".into(), 1024)),
+        );
+        let mut routes = HashMap::new();
+        routes.insert(TaskType::Coding, vec!["claude".into()]);
+        routes.insert(TaskType::General, vec!["ollama".into()]);
+
+        let orch =
+            ModelOrchestrator::new(routes, providers, "ollama".into(), "ollama".into()).unwrap();
+
+        let provider = orch.select_provider(&user_msg("implement a function"));
+        assert_eq!(provider.name(), "claude");
+
+        let provider = orch.select_provider(&user_msg("hello there"));
+        assert_eq!(provider.name(), "ollama");
+    }
 }

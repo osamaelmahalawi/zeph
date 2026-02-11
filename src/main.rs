@@ -667,3 +667,773 @@ fn create_channel(config: &Config) -> anyhow::Result<AnyChannel> {
         Ok(AnyChannel::Cli(CliChannel::new()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zeph_core::channel::Channel;
+
+    #[test]
+    fn vault_args_defaults_in_test_context() {
+        let args = parse_vault_args();
+        assert_eq!(args.backend, "env");
+        assert!(args.key_path.is_none());
+        assert!(args.vault_path.is_none());
+    }
+
+    #[test]
+    fn vault_args_struct_construction() {
+        let args = VaultArgs {
+            backend: "age".into(),
+            key_path: Some("/tmp/key".into()),
+            vault_path: Some("/tmp/vault".into()),
+        };
+        assert_eq!(args.backend, "age");
+        assert_eq!(args.key_path.as_deref(), Some("/tmp/key"));
+        assert_eq!(args.vault_path.as_deref(), Some("/tmp/vault"));
+    }
+
+    #[test]
+    fn vault_args_struct_env_backend() {
+        let args = VaultArgs {
+            backend: "env".into(),
+            key_path: None,
+            vault_path: None,
+        };
+        assert_eq!(args.backend, "env");
+        assert!(args.key_path.is_none());
+        assert!(args.vault_path.is_none());
+    }
+
+    #[test]
+    fn create_channel_returns_cli_when_no_telegram() {
+        let config = Config::load(Path::new("/nonexistent/config.toml")).unwrap();
+        let channel = create_channel(&config).unwrap();
+        assert!(matches!(channel, AnyChannel::Cli(_)));
+    }
+
+    #[test]
+    fn any_channel_debug_cli() {
+        let ch = AnyChannel::Cli(CliChannel::new());
+        let debug = format!("{ch:?}");
+        assert!(debug.contains("Cli"));
+    }
+
+    #[tokio::test]
+    async fn any_channel_cli_send() {
+        let mut ch = AnyChannel::Cli(CliChannel::new());
+        let result = ch.send("test message").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn any_channel_cli_send_chunk() {
+        let mut ch = AnyChannel::Cli(CliChannel::new());
+        let result = ch.send_chunk("chunk").await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn any_channel_cli_flush_chunks() {
+        let mut ch = AnyChannel::Cli(CliChannel::new());
+        ch.send_chunk("data").await.unwrap();
+        let result = ch.flush_chunks().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn any_channel_cli_send_typing() {
+        let mut ch = AnyChannel::Cli(CliChannel::new());
+        let result = ch.send_typing().await;
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn config_loading_from_default_toml() {
+        let config = Config::load(Path::new("config/default.toml"));
+        assert!(config.is_ok());
+    }
+
+    #[test]
+    fn config_loading_nonexistent_uses_defaults() {
+        let config = Config::load(Path::new("/does/not/exist.toml")).unwrap();
+        assert_eq!(config.llm.provider, "ollama");
+        assert_eq!(config.agent.name, "Zeph");
+    }
+
+    #[test]
+    fn create_provider_ollama() {
+        let config = Config::load(Path::new("/nonexistent")).unwrap();
+        let provider = create_provider(&config).unwrap();
+        assert!(matches!(provider, AnyProvider::Ollama(_)));
+        assert_eq!(provider.name(), "ollama");
+    }
+
+    #[test]
+    fn create_provider_unknown_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "unknown_provider".into();
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("unknown LLM provider")
+        );
+    }
+
+    #[test]
+    fn create_provider_claude_without_cloud_config_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "claude".into();
+        config.llm.cloud = None;
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("llm.cloud config section required")
+        );
+    }
+
+    #[test]
+    fn create_channel_no_telegram_config() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.telegram = None;
+        let channel = create_channel(&config).unwrap();
+        assert!(matches!(channel, AnyChannel::Cli(_)));
+    }
+
+    #[test]
+    fn create_channel_telegram_without_token() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.telegram = Some(zeph_core::config::TelegramConfig {
+            token: None,
+            allowed_users: vec![],
+        });
+        let channel = create_channel(&config).unwrap();
+        assert!(matches!(channel, AnyChannel::Cli(_)));
+    }
+
+    #[tokio::test]
+    async fn health_check_ollama_unreachable() {
+        let provider = AnyProvider::Ollama(OllamaProvider::new(
+            "http://127.0.0.1:1",
+            "test".into(),
+            "embed".into(),
+        ));
+        health_check(&provider).await;
+    }
+
+    #[tokio::test]
+    async fn health_check_claude_noop() {
+        let provider = AnyProvider::Claude(ClaudeProvider::new("key".into(), "model".into(), 1024));
+        health_check(&provider).await;
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn select_device_cpu_default() {
+        let device = select_device("cpu").unwrap();
+        assert!(matches!(device, zeph_llm::candle_provider::Device::Cpu));
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn select_device_unknown_defaults_to_cpu() {
+        let device = select_device("unknown").unwrap();
+        assert!(matches!(device, zeph_llm::candle_provider::Device::Cpu));
+    }
+
+    #[cfg(all(feature = "candle", not(feature = "metal")))]
+    #[test]
+    fn select_device_metal_without_feature_errors() {
+        let result = select_device("metal");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("metal feature"));
+    }
+
+    #[cfg(all(feature = "candle", not(feature = "cuda")))]
+    #[test]
+    fn select_device_cuda_without_feature_errors() {
+        let result = select_device("cuda");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("cuda feature"));
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn select_device_auto_fallback() {
+        let device = select_device("auto").unwrap();
+        assert!(matches!(
+            device,
+            zeph_llm::candle_provider::Device::Cpu
+                | zeph_llm::candle_provider::Device::Cuda(_)
+                | zeph_llm::candle_provider::Device::Metal(_)
+        ));
+    }
+
+    #[cfg(feature = "candle")]
+    #[test]
+    fn create_provider_candle_without_config_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "candle".into();
+        config.llm.candle = None;
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("llm.candle config section required")
+        );
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[test]
+    fn create_provider_orchestrator_without_config_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+        config.llm.orchestrator = None;
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("llm.orchestrator config section required")
+        );
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[test]
+    fn build_orchestrator_with_unknown_provider_errors() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "test".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "unknown_type".to_string(),
+                model: None,
+                filename: None,
+                device: None,
+            },
+        );
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes: HashMap::new(),
+            default: "test".to_string(),
+            embed: "test".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("unknown orchestrator sub-provider type")
+        );
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[test]
+    fn build_orchestrator_claude_without_cloud_config_errors() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+        config.llm.cloud = None;
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "claude_sub".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "claude".to_string(),
+                model: None,
+                filename: None,
+                device: None,
+            },
+        );
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes: HashMap::new(),
+            default: "claude_sub".to_string(),
+            embed: "claude_sub".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("llm.cloud config required")
+        );
+    }
+
+    #[cfg(all(feature = "orchestrator", feature = "candle"))]
+    #[test]
+    fn build_orchestrator_candle_without_config_errors() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+        config.llm.candle = None;
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "candle_sub".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "candle".to_string(),
+                model: None,
+                filename: None,
+                device: None,
+            },
+        );
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes: HashMap::new(),
+            default: "candle_sub".to_string(),
+            embed: "candle_sub".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("llm.candle config required")
+        );
+    }
+
+    #[cfg(feature = "mcp")]
+    #[test]
+    fn create_mcp_manager_with_http_transport() {
+        use std::collections::HashMap;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.mcp.servers = vec![zeph_core::config::McpServerConfig {
+            id: "test".into(),
+            url: Some("http://localhost:3000".into()),
+            command: None,
+            args: vec![],
+            env: HashMap::new(),
+            timeout: 30,
+        }];
+
+        let manager = create_mcp_manager(&config);
+        let debug = format!("{manager:?}");
+        assert!(debug.contains("server_count: 1"));
+    }
+
+    #[cfg(feature = "mcp")]
+    #[test]
+    fn create_mcp_manager_with_stdio_transport() {
+        use std::collections::HashMap;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.mcp.servers = vec![zeph_core::config::McpServerConfig {
+            id: "test".into(),
+            url: None,
+            command: Some("node".into()),
+            args: vec!["server.js".into()],
+            env: HashMap::new(),
+            timeout: 30,
+        }];
+
+        let manager = create_mcp_manager(&config);
+        let debug = format!("{manager:?}");
+        assert!(debug.contains("server_count: 1"));
+    }
+
+    #[cfg(feature = "mcp")]
+    #[test]
+    fn create_mcp_manager_empty_servers() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.mcp.servers = vec![];
+
+        let manager = create_mcp_manager(&config);
+        let debug = format!("{manager:?}");
+        assert!(debug.contains("server_count: 0"));
+    }
+
+    #[cfg(feature = "mcp")]
+    #[tokio::test]
+    async fn create_mcp_registry_when_semantic_disabled() {
+        let config_path = Path::new("/nonexistent");
+        let mut config = Config::load(config_path).unwrap();
+        config.memory.semantic.enabled = false;
+
+        let provider = AnyProvider::Ollama(OllamaProvider::new(
+            "http://localhost:11434",
+            "test".into(),
+            "embed".into(),
+        ));
+
+        let mcp_tools = vec![];
+        let registry = create_mcp_registry(&config, &provider, &mcp_tools).await;
+        assert!(registry.is_none());
+    }
+
+    #[cfg(feature = "a2a")]
+    #[test]
+    fn echo_task_processor_construction() {
+        let _processor = EchoTaskProcessor;
+    }
+
+    #[cfg(feature = "a2a")]
+    #[tokio::test]
+    async fn echo_task_processor_echo_response() {
+        use zeph_a2a::TaskProcessor;
+        let processor = EchoTaskProcessor;
+        let message = zeph_a2a::Message {
+            role: zeph_a2a::Role::User,
+            parts: vec![zeph_a2a::Part::text("hello")],
+            message_id: None,
+            task_id: None,
+            context_id: None,
+            metadata: None,
+        };
+
+        let result = processor.process("task-1".into(), message).await.unwrap();
+        let response_text = result.response.text_content().unwrap();
+        assert_eq!(response_text, "echo: hello");
+        assert_eq!(result.response.role, zeph_a2a::Role::Agent);
+        assert!(result.artifacts.is_empty());
+    }
+
+    #[cfg(feature = "a2a")]
+    #[tokio::test]
+    async fn echo_task_processor_empty_message() {
+        use zeph_a2a::TaskProcessor;
+        let processor = EchoTaskProcessor;
+        let message = zeph_a2a::Message {
+            role: zeph_a2a::Role::User,
+            parts: vec![],
+            message_id: None,
+            task_id: None,
+            context_id: None,
+            metadata: None,
+        };
+
+        let result = processor.process("task-2".into(), message).await.unwrap();
+        let response_text = result.response.text_content().unwrap();
+        assert_eq!(response_text, "echo: ");
+    }
+
+    #[test]
+    fn create_provider_claude_without_api_key_errors() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "claude".into();
+        config.llm.cloud = Some(zeph_core::config::CloudLlmConfig {
+            model: "claude-3-opus".into(),
+            max_tokens: 4096,
+        });
+        config.secrets.claude_api_key = None;
+
+        let result = create_provider(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ZEPH_CLAUDE_API_KEY not found")
+        );
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[test]
+    fn build_orchestrator_claude_sub_without_api_key_errors() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+        config.llm.cloud = Some(zeph_core::config::CloudLlmConfig {
+            model: "claude-3".into(),
+            max_tokens: 4096,
+        });
+        config.secrets.claude_api_key = None;
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "claude_sub".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "claude".to_string(),
+                model: None,
+                filename: None,
+                device: None,
+            },
+        );
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes: HashMap::new(),
+            default: "claude_sub".to_string(),
+            embed: "claude_sub".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("ZEPH_CLAUDE_API_KEY required")
+        );
+    }
+
+    #[tokio::test]
+    async fn create_skill_matcher_when_semantic_disabled() {
+        let config_path = Path::new("/nonexistent");
+        let mut config = Config::load(config_path).unwrap();
+        config.memory.semantic.enabled = false;
+
+        let provider = AnyProvider::Ollama(OllamaProvider::new(
+            "http://localhost:11434",
+            "test".into(),
+            "embed".into(),
+        ));
+
+        let memory = SemanticMemory::new(
+            &config.memory.sqlite_path,
+            &config.memory.qdrant_url,
+            provider.clone(),
+            &config.llm.embedding_model,
+        )
+        .await
+        .unwrap();
+
+        let meta: Vec<&SkillMeta> = vec![];
+        let result = create_skill_matcher(&config, &provider, &meta, &memory).await;
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn any_channel_debug_telegram() {
+        use zeph_channels::telegram::TelegramChannel;
+        let tg = TelegramChannel::new("test_token".to_string(), vec![]);
+        let ch = AnyChannel::Telegram(tg);
+        let debug = format!("{ch:?}");
+        assert!(debug.contains("Telegram"));
+    }
+
+    #[tokio::test]
+    async fn any_channel_telegram_send_typing() {
+        use zeph_channels::telegram::TelegramChannel;
+        let tg = TelegramChannel::new("invalid_token_for_test".to_string(), vec![]);
+        let mut ch = AnyChannel::Telegram(tg);
+        let _result = ch.send_typing().await;
+    }
+
+    #[tokio::test]
+    async fn create_channel_telegram_with_token() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.telegram = Some(zeph_core::config::TelegramConfig {
+            token: Some("test_token".to_string()),
+            allowed_users: vec![],
+        });
+        let channel = create_channel(&config).unwrap();
+        assert!(matches!(channel, AnyChannel::Telegram(_)));
+    }
+
+    #[tokio::test]
+    async fn create_channel_telegram_with_empty_allowed_users() {
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.telegram = Some(zeph_core::config::TelegramConfig {
+            token: Some("test_token2".to_string()),
+            allowed_users: vec![],
+        });
+        let channel = create_channel(&config).unwrap();
+        assert!(matches!(channel, AnyChannel::Telegram(_)));
+    }
+
+    #[cfg(feature = "candle")]
+    #[tokio::test]
+    async fn health_check_candle_logs_device() {
+        use zeph_llm::candle_provider::CandleProvider;
+
+        let source = zeph_llm::candle_provider::loader::ModelSource::HuggingFace {
+            repo_id: "test/model".to_string(),
+            filename: Some("model.gguf".to_string()),
+        };
+        let template = zeph_llm::candle_provider::template::ChatTemplate::parse_str(
+            "{{ bos_token }}{{ messages[0].content }}",
+        );
+        let gen_config = zeph_llm::candle_provider::generate::GenerationConfig {
+            temperature: 0.7,
+            top_p: Some(0.9),
+            top_k: Some(50),
+            max_tokens: 512,
+            seed: 42,
+            repeat_penalty: 1.1,
+            repeat_last_n: 64,
+        };
+        let device = zeph_llm::candle_provider::Device::Cpu;
+
+        let candle_result =
+            CandleProvider::new(&source, template, gen_config, Some("embed/model"), device);
+
+        if let Ok(candle) = candle_result {
+            let provider = AnyProvider::Candle(candle);
+            health_check(&provider).await;
+        }
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[tokio::test]
+    async fn health_check_orchestrator_logs_providers() {
+        use std::collections::HashMap;
+        use zeph_llm::orchestrator::{ModelOrchestrator, SubProvider};
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama_local".to_string(),
+            SubProvider::Ollama(OllamaProvider::new(
+                "http://localhost:11434",
+                "test".into(),
+                "embed".into(),
+            )),
+        );
+
+        let routes = HashMap::new();
+        let orch = ModelOrchestrator::new(
+            routes,
+            providers,
+            "ollama_local".to_string(),
+            "ollama_local".to_string(),
+        )
+        .unwrap();
+
+        let provider = AnyProvider::Orchestrator(Box::new(orch));
+        health_check(&provider).await;
+    }
+
+    #[cfg(all(feature = "orchestrator", feature = "candle"))]
+    #[test]
+    fn build_orchestrator_with_candle_local_source() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+        config.llm.candle = Some(zeph_core::config::CandleConfig {
+            source: "local".into(),
+            local_path: "/tmp/model.gguf".into(),
+            filename: Some("model.gguf".to_string()),
+            chat_template: "{{ messages[0].content }}".into(),
+            device: "cpu".into(),
+            embedding_repo: Some("embed/model".into()),
+            generation: zeph_core::config::GenerationParams {
+                temperature: 0.7,
+                top_p: Some(0.9),
+                top_k: Some(50),
+                max_tokens: 512,
+                seed: 42,
+                repeat_penalty: 1.1,
+                repeat_last_n: 64,
+            },
+        });
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "candle_local".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "candle".to_string(),
+                model: Some("local-model".to_string()),
+                filename: None,
+                device: Some("cpu".to_string()),
+            },
+        );
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes: HashMap::new(),
+            default: "candle_local".to_string(),
+            embed: "candle_local".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_err(), "expected error loading nonexistent model");
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[test]
+    fn build_orchestrator_with_ollama_sub_provider() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama_sub".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "ollama".to_string(),
+                model: Some("llama2".to_string()),
+                filename: None,
+                device: None,
+            },
+        );
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes: HashMap::new(),
+            default: "ollama_sub".to_string(),
+            embed: "ollama_sub".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "orchestrator")]
+    #[test]
+    fn build_orchestrator_routes_parsing() {
+        use std::collections::HashMap;
+        use zeph_core::config::OrchestratorProviderConfig;
+
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        config.llm.provider = "orchestrator".into();
+
+        let mut providers = HashMap::new();
+        providers.insert(
+            "ollama_sub".to_string(),
+            OrchestratorProviderConfig {
+                provider_type: "ollama".to_string(),
+                model: None,
+                filename: None,
+                device: None,
+            },
+        );
+
+        let mut routes = HashMap::new();
+        routes.insert("chat".to_string(), vec!["ollama_sub".to_string()]);
+        routes.insert("embed".to_string(), vec!["ollama_sub".to_string()]);
+
+        config.llm.orchestrator = Some(zeph_core::config::OrchestratorConfig {
+            providers,
+            routes,
+            default: "ollama_sub".to_string(),
+            embed: "ollama_sub".to_string(),
+        });
+
+        let result = build_orchestrator(&config);
+        assert!(result.is_ok());
+    }
+}
