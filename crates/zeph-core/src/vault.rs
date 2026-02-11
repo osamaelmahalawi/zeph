@@ -103,7 +103,11 @@ impl AgeVaultProvider {
     /// Returns [`AgeVaultError`] on key/vault read failure, parse error, or decryption failure.
     pub fn new(key_path: &Path, vault_path: &Path) -> Result<Self, AgeVaultError> {
         let key_str = std::fs::read_to_string(key_path).map_err(AgeVaultError::KeyRead)?;
-        let identity: age::x25519::Identity = key_str
+        let key_line = key_str
+            .lines()
+            .find(|l| !l.starts_with('#') && !l.trim().is_empty())
+            .ok_or_else(|| AgeVaultError::KeyParse("no identity line found".into()))?;
+        let identity: age::x25519::Identity = key_line
             .trim()
             .parse()
             .map_err(|e: &str| AgeVaultError::KeyParse(e.to_owned()))?;
@@ -404,6 +408,37 @@ mod age_tests {
         assert!(debug.contains("AgeVaultProvider"));
         assert!(debug.contains("[2 secrets]"));
         assert!(!debug.contains("value1"));
+    }
+
+    #[tokio::test]
+    async fn age_vault_key_file_with_comments() {
+        let identity = age::x25519::Identity::generate();
+        let json = serde_json::json!({"KEY": "value"});
+        let encrypted = encrypt_json(&identity, &json);
+        let (_dir, key_path, vault_path) = write_temp_files(&identity, &encrypted);
+
+        let key_with_comments = format!(
+            "# created: 2026-02-11T12:00:00+03:00\n# public key: {}\n{}\n",
+            identity.to_public(),
+            identity.to_string().expose_secret()
+        );
+        std::fs::write(&key_path, &key_with_comments).unwrap();
+
+        let vault = AgeVaultProvider::new(&key_path, &vault_path).unwrap();
+        let result = vault.get_secret("KEY").await.unwrap();
+        assert_eq!(result.as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn age_vault_key_file_only_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let key_path = dir.path().join("comments-only.txt");
+        std::fs::write(&key_path, "# comment\n# another\n").unwrap();
+        let vault_path = dir.path().join("vault.age");
+        std::fs::write(&vault_path, b"dummy").unwrap();
+
+        let err = AgeVaultProvider::new(&key_path, &vault_path).unwrap_err();
+        assert!(matches!(err, AgeVaultError::KeyParse(_)));
     }
 
     #[test]
