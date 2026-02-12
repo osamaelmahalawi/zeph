@@ -285,6 +285,21 @@ async fn main() -> anyhow::Result<()> {
         std::thread::spawn(move || reader.run());
 
         let mut app = App::new(tui_handle.user_tx, tui_handle.agent_rx);
+
+        let history: Vec<(&str, &str)> = agent
+            .context_messages()
+            .iter()
+            .map(|m| {
+                let role = match m.role {
+                    zeph_llm::provider::Role::User => "user",
+                    zeph_llm::provider::Role::Assistant => "assistant",
+                    zeph_llm::provider::Role::System => "system",
+                };
+                (role, m.content.as_str())
+            })
+            .collect();
+        app.load_history(&history);
+
         if let Some(rx) = tui_metrics_rx {
             app = app.with_metrics_rx(rx);
         }
@@ -1301,7 +1316,8 @@ mod tests {
     #[cfg(feature = "a2a")]
     #[test]
     fn echo_task_processor_construction() {
-        let _processor = EchoTaskProcessor;
+        let processor = EchoTaskProcessor;
+        assert!(std::mem::size_of_val(&processor) == 0);
     }
 
     #[cfg(feature = "a2a")]

@@ -45,6 +45,7 @@ pub struct App {
     cursor_position: usize,
     input_mode: InputMode,
     messages: Vec<ChatMessage>,
+    show_splash: bool,
     scroll_offset: usize,
     pub metrics: MetricsSnapshot,
     metrics_rx: Option<watch::Receiver<MetricsSnapshot>>,
@@ -66,6 +67,7 @@ impl App {
             cursor_position: 0,
             input_mode: InputMode::Insert,
             messages: Vec::new(),
+            show_splash: true,
             scroll_offset: 0,
             metrics: MetricsSnapshot::default(),
             metrics_rx: None,
@@ -74,6 +76,29 @@ impl App {
             should_quit: false,
             user_input_tx,
             agent_event_rx,
+        }
+    }
+
+    #[must_use]
+    pub fn show_splash(&self) -> bool {
+        self.show_splash
+    }
+
+    pub fn load_history(&mut self, messages: &[(&str, &str)]) {
+        for &(role_str, content) in messages {
+            let role = match role_str {
+                "user" => MessageRole::User,
+                "assistant" => MessageRole::Assistant,
+                _ => continue,
+            };
+            self.messages.push(ChatMessage {
+                role,
+                content: content.to_owned(),
+                streaming: false,
+            });
+        }
+        if !self.messages.is_empty() {
+            self.show_splash = false;
         }
     }
 
@@ -123,6 +148,15 @@ impl App {
         match event {
             AppEvent::Key(key) => self.handle_key(key),
             AppEvent::Tick | AppEvent::Resize(_, _) => {}
+            AppEvent::MouseScroll(delta) => {
+                if self.confirm_state.is_none() {
+                    if delta > 0 {
+                        self.scroll_offset = self.scroll_offset.saturating_add(1);
+                    } else {
+                        self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                    }
+                }
+            }
             AppEvent::Agent(agent_event) => self.handle_agent_event(agent_event),
         }
         Ok(())
@@ -182,11 +216,16 @@ impl App {
         self.confirm_state.as_ref()
     }
 
-    pub fn draw(&self, frame: &mut ratatui::Frame) {
+    pub fn draw(&mut self, frame: &mut ratatui::Frame) {
         let layout = AppLayout::compute(frame.area());
 
         self.draw_header(frame, layout.header);
-        widgets::chat::render(self, frame, layout.chat);
+        if self.show_splash {
+            widgets::splash::render(frame, layout.chat);
+        } else {
+            let max_scroll = widgets::chat::render(self, frame, layout.chat);
+            self.scroll_offset = self.scroll_offset.min(max_scroll);
+        }
         self.draw_side_panel(frame, &layout);
         widgets::input::render(self, frame, layout.input);
         widgets::status::render(self, &self.metrics, frame, layout.status);
@@ -356,6 +395,7 @@ impl App {
         if text.is_empty() {
             return;
         }
+        self.show_splash = false;
         self.messages.push(ChatMessage {
             role: MessageRole::User,
             content: text.clone(),
@@ -377,7 +417,8 @@ mod tests {
     fn make_app() -> (App, mpsc::Receiver<String>, mpsc::Sender<AgentEvent>) {
         let (user_tx, user_rx) = mpsc::channel(16);
         let (agent_tx, agent_rx) = mpsc::channel(16);
-        let app = App::new(user_tx, agent_rx);
+        let mut app = App::new(user_tx, agent_rx);
+        app.messages.clear();
         (app, user_rx, agent_tx)
     }
 
@@ -387,6 +428,7 @@ mod tests {
         assert!(app.input().is_empty());
         assert_eq!(app.input_mode(), InputMode::Insert);
         assert!(app.messages().is_empty());
+        assert!(app.show_splash());
         assert!(!app.should_quit);
     }
 
@@ -731,5 +773,50 @@ mod tests {
         app.handle_event(AppEvent::Key(key)).unwrap();
         assert_eq!(app.input(), "a\nb");
         assert_eq!(app.cursor_position(), 2);
+    }
+
+    #[test]
+    fn mouse_scroll_up() {
+        let (mut app, _rx, _tx) = make_app();
+        assert_eq!(app.scroll_offset(), 0);
+        app.handle_event(AppEvent::MouseScroll(1)).unwrap();
+        assert_eq!(app.scroll_offset(), 1);
+        app.handle_event(AppEvent::MouseScroll(1)).unwrap();
+        assert_eq!(app.scroll_offset(), 2);
+    }
+
+    #[test]
+    fn mouse_scroll_down() {
+        let (mut app, _rx, _tx) = make_app();
+        app.scroll_offset = 5;
+        app.handle_event(AppEvent::MouseScroll(-1)).unwrap();
+        assert_eq!(app.scroll_offset(), 4);
+        app.handle_event(AppEvent::MouseScroll(-1)).unwrap();
+        assert_eq!(app.scroll_offset(), 3);
+    }
+
+    #[test]
+    fn mouse_scroll_down_saturates_at_zero() {
+        let (mut app, _rx, _tx) = make_app();
+        app.scroll_offset = 1;
+        app.handle_event(AppEvent::MouseScroll(-1)).unwrap();
+        assert_eq!(app.scroll_offset(), 0);
+        app.handle_event(AppEvent::MouseScroll(-1)).unwrap();
+        assert_eq!(app.scroll_offset(), 0);
+    }
+
+    #[test]
+    fn mouse_scroll_during_confirm_blocked() {
+        let (mut app, _rx, _tx) = make_app();
+        let (tx, _oneshot_rx) = tokio::sync::oneshot::channel();
+        app.confirm_state = Some(ConfirmState {
+            prompt: "test?".into(),
+            response_tx: Some(tx),
+        });
+        app.scroll_offset = 5;
+        app.handle_event(AppEvent::MouseScroll(1)).unwrap();
+        assert_eq!(app.scroll_offset(), 5);
+        app.handle_event(AppEvent::MouseScroll(-1)).unwrap();
+        assert_eq!(app.scroll_offset(), 5);
     }
 }
