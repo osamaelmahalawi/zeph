@@ -12,7 +12,7 @@ Naive AI agent implementations inject all available tools and instructions into 
 
 Per query, only the top-K most relevant skills (default: 5) are selected via cosine similarity of vector embeddings. The same pipeline handles MCP tools.
 
-```
+```text
 User query → embed(query) → cosine_similarity(query, skills) → top-K → inject into prompt
 ```
 

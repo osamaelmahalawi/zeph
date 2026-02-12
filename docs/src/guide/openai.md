@@ -1,6 +1,6 @@
 # OpenAI Provider
 
-Connect to OpenAI API or any OpenAI-compatible service (Together AI, Groq, Fireworks, Perplexity).
+Use the OpenAI provider to connect to OpenAI API or any OpenAI-compatible service (Together AI, Groq, Fireworks, Perplexity).
 
 ```bash
 ZEPH_LLM_PROVIDER=openai ZEPH_OPENAI_API_KEY=sk-... ./target/release/zeph

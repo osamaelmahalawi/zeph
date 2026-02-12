@@ -13,10 +13,10 @@ default = "claude"
 embed = "ollama"
 
 [llm.orchestrator.providers.ollama]
-type = "ollama"
+provider_type = "ollama"
 
 [llm.orchestrator.providers.claude]
-type = "claude"
+provider_type = "claude"
 
 [llm.orchestrator.routes]
 coding = ["claude", "ollama"]       # try Claude first, fallback to Ollama
@@ -64,10 +64,10 @@ default = "claude"
 embed = "ollama"
 
 [llm.orchestrator.providers.ollama]
-type = "ollama"
+provider_type = "ollama"
 
 [llm.orchestrator.providers.claude]
-type = "claude"
+provider_type = "claude"
 
 [llm.orchestrator.routes]
 general = ["claude"]

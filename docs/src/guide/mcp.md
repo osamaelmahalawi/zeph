@@ -35,7 +35,7 @@ max_dynamic_servers = 10
 
 Add and remove MCP servers at runtime via chat commands:
 
-```
+```text
 /mcp add filesystem npx -y @anthropic/mcp-filesystem
 /mcp add remote-api http://localhost:8080/mcp
 /mcp list

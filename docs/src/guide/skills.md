@@ -43,7 +43,7 @@ Use `/skills` in chat to see all available skills and their usage statistics.
 
 A skill is a single `SKILL.md` file inside a named directory:
 
-```
+```text
 skills/
 └── my-skill/
     └── SKILL.md
@@ -80,7 +80,7 @@ Instructions and examples go here.
 
 Skills can include additional resource directories:
 
-```
+```text
 skills/
 └── system-info/
     ├── SKILL.md

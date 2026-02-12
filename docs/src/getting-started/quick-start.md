@@ -1,5 +1,7 @@
 # Quick Start
 
+Run Zeph after building and interact via CLI, Telegram, or a cloud provider.
+
 ## CLI Mode (default)
 
 **Unix (Linux/macOS):**

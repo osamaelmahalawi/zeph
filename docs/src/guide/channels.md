@@ -51,7 +51,6 @@ Run Zeph as a Telegram bot with streaming responses, MarkdownV2 formatting, and 
    ZEPH_TELEGRAM_TOKEN=your-token
    ```
 
-> [!IMPORTANT]
 > The token is resolved via the vault provider (`ZEPH_TELEGRAM_TOKEN` secret). When using the `env` vault backend (default), set the environment variable directly. With the `age` backend, store it in the encrypted vault file.
 
 ### User Whitelisting

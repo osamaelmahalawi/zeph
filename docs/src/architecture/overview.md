@@ -1,12 +1,12 @@
 # Architecture Overview
 
-Cargo workspace (Edition 2024, resolver 3) with 9 crates + binary root.
+Cargo workspace (Edition 2024, resolver 3) with 10 crates + binary root.
 
 Requires Rust 1.88+. Native async traits are used throughout — no `async-trait` crate.
 
 ## Workspace Layout
 
-```
+```text
 zeph (binary) — thin bootstrap glue
 ├── zeph-core       Agent loop, config, channel trait, context builder
 ├── zeph-llm        LlmProvider trait, Ollama + Claude + OpenAI + Candle backends, orchestrator, embeddings
@@ -22,7 +22,7 @@ zeph (binary) — thin bootstrap glue
 
 ## Dependency Graph
 
-```
+```text
 zeph (binary)
   └── zeph-core (orchestrates everything)
         ├── zeph-llm (leaf)

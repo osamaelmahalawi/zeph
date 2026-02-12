@@ -73,8 +73,10 @@ cargo llvm-cov --all-features --workspace
 | `zeph-memory` | SQLite conversation persistence, Qdrant vector search |
 | `zeph-channels` | Telegram adapter |
 | `zeph-tools` | Tool executor, shell sandbox, web scraper |
+| `zeph-index` | AST-based code indexing, semantic retrieval, repo map |
 | `zeph-mcp` | MCP client, multi-server lifecycle |
 | `zeph-a2a` | A2A protocol client and server |
+| `zeph-tui` | ratatui TUI dashboard with real-time metrics |
 
 ## Pull Requests
 

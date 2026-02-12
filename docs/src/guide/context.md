@@ -24,7 +24,7 @@ summarize_output = false          # Enable LLM-based tool output summarization
 
 When `context_budget_tokens > 0`, the context window is structured as:
 
-```
+```text
 ┌─────────────────────────────────────────────────┐
 │ BASE_PROMPT (identity + guidelines + security)  │  ~300 tokens
 ├─────────────────────────────────────────────────┤
@@ -66,7 +66,7 @@ When semantic memory is enabled, the agent queries Qdrant for messages relevant 
 
 - Removed and re-injected on every turn (never stale)
 - Not persisted to SQLite
-- Bounded by the 25% token budget allocation
+- Bounded by the allocated token budget (25%, or 10% when [code indexing](code-indexing.md) is enabled)
 
 Requires Qdrant and `memory.semantic.enabled = true`.
 

@@ -49,7 +49,7 @@ The `zeph-index` crate contains 7 modules:
 
 ### Pipeline
 
-```
+```text
 Source files
     |
     v
@@ -70,7 +70,7 @@ Source files
 
 ### Retrieval
 
-```
+```text
 User query
     |
     v
@@ -139,7 +139,7 @@ A lightweight structural map of the project, generated via tree-sitter signature
 
 Example output:
 
-```
+```text
 <repo_map>
   src/agent.rs :: struct:Agent, impl:Agent, fn:new, fn:run, fn:prepare_context
   src/config.rs :: struct:Config, fn:load
@@ -160,7 +160,7 @@ Retrieved code is injected as a transient `<code_context>` XML block before the 
 
 When code indexing is enabled, the context window includes two additional sections:
 
-```
+```text
 +---------------------------------------------------+
 | System prompt + environment + ZEPH.md             |
 +---------------------------------------------------+

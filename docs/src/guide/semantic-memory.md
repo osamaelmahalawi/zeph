@@ -20,7 +20,7 @@ Requires an embedding model. Ollama with `qwen3-embedding` is the default. Claud
    recall_limit = 5
    ```
 
-3. **Automatic setup:** Qdrant collection (`zeph_conversations`) is created automatically on first use with correct vector dimensions (896 for `qwen3-embedding`) and Cosine distance metric. No manual initialization required.
+3. **Automatic setup:** Qdrant collection (`zeph_conversations`) is created automatically on first use with correct vector dimensions (1024 for `qwen3-embedding`) and Cosine distance metric. No manual initialization required.
 
 ## How It Works
 

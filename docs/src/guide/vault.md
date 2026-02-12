@@ -13,7 +13,7 @@ Zeph resolves secrets (`ZEPH_CLAUDE_API_KEY`, `ZEPH_OPENAI_API_KEY`, `ZEPH_TELEG
 
 ## Environment Variables (default)
 
-Simply export secrets as environment variables:
+Export secrets as environment variables:
 
 ```bash
 export ZEPH_CLAUDE_API_KEY=sk-ant-...

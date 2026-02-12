@@ -1,5 +1,7 @@
 # Feature Flags
 
+Zeph uses Cargo feature flags to control optional functionality. Default features cover common use cases; platform-specific and experimental features are opt-in.
+
 | Feature | Default | Description |
 |---------|---------|-------------|
 | `a2a` | Enabled | [A2A protocol](https://github.com/a2aproject/A2A) client and server for agent-to-agent communication |

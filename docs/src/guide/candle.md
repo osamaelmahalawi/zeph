@@ -1,6 +1,6 @@
 # Local Inference (Candle)
 
-Run HuggingFace models locally via [candle](https://github.com/huggingface/candle) without external API dependencies. Supports GGUF quantized models with Metal/CUDA acceleration.
+Run HuggingFace GGUF models locally via [candle](https://github.com/huggingface/candle) without external API dependencies. Metal and CUDA GPU acceleration are supported.
 
 ```bash
 cargo build --release --features candle,metal  # macOS with Metal GPU
@@ -16,7 +16,7 @@ provider = "candle"
 source = "huggingface"
 repo_id = "TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
 filename = "mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-template = "mistral"              # llama3, chatml, mistral, phi3, raw
+chat_template = "mistral"          # llama3, chatml, mistral, phi3, raw
 embedding_repo = "sentence-transformers/all-MiniLM-L6-v2"  # optional BERT embeddings
 
 [llm.candle.generation]

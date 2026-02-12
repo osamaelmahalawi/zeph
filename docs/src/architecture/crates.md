@@ -1,5 +1,7 @@
 # Crates
 
+Each workspace crate has a focused responsibility. All leaf crates are independent and testable in isolation; only `zeph-core` depends on other workspace members.
+
 ## zeph-core
 
 Agent loop, configuration loading, and context builder.
