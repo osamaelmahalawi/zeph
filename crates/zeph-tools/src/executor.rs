@@ -34,6 +34,28 @@ pub fn truncate_tool_output(output: &str) -> String {
     )
 }
 
+/// Event emitted during tool execution for real-time UI updates.
+#[derive(Debug, Clone)]
+pub enum ToolEvent {
+    Started {
+        tool_name: String,
+        command: String,
+    },
+    OutputChunk {
+        tool_name: String,
+        command: String,
+        chunk: String,
+    },
+    Completed {
+        tool_name: String,
+        command: String,
+        output: String,
+        success: bool,
+    },
+}
+
+pub type ToolEventTx = tokio::sync::mpsc::UnboundedSender<ToolEvent>;
+
 /// Errors that can occur during tool execution.
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {

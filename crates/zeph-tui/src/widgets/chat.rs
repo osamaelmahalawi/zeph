@@ -4,12 +4,13 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use throbber_widgets_tui::{BRAILLE_SIX, Throbber, WhichUse};
 
 use crate::app::{App, MessageRole};
 use crate::theme::Theme;
 
 /// Returns the maximum scroll offset for the rendered content.
-pub fn render(app: &App, frame: &mut Frame, area: Rect) -> usize {
+pub fn render(app: &mut App, frame: &mut Frame, area: Rect) -> usize {
     if area.width == 0 || area.height == 0 {
         return 0;
     }
@@ -21,10 +22,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) -> usize {
     let mut lines: Vec<Line<'_>> = Vec::new();
 
     for msg in app.messages() {
+        if msg.role == MessageRole::Tool {
+            render_tool_message(msg, app, &theme, wrap_width, &mut lines);
+            lines.push(Line::default());
+            continue;
+        }
+
         let (prefix, base_style) = match msg.role {
             MessageRole::User => ("[user] ", theme.user_message),
             MessageRole::Assistant => ("[zeph] ", theme.assistant_message),
             MessageRole::System => ("[system] ", theme.system_message),
+            MessageRole::Tool => unreachable!(),
         };
 
         let indent = " ".repeat(prefix.len());
@@ -107,7 +115,28 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) -> usize {
         );
     }
 
+    render_thinking(app, frame, area, &theme);
+
     max_scroll
+}
+
+fn render_thinking(app: &mut App, frame: &mut Frame, area: Rect, theme: &Theme) {
+    let Some(label) = app.status_label() else {
+        return;
+    };
+    if area.height <= 3 {
+        return;
+    }
+    let label = format!(" {label}");
+    let y = area.y + area.height.saturating_sub(2);
+    let throbber_area = Rect::new(area.x + 1, y, area.width.saturating_sub(2), 1);
+    let throbber = Throbber::default()
+        .label(label)
+        .style(theme.assistant_message)
+        .throbber_style(theme.highlight)
+        .throbber_set(BRAILLE_SIX)
+        .use_type(WhichUse::Spin);
+    frame.render_stateful_widget(throbber, throbber_area, app.throbber_state_mut());
 }
 
 fn render_scrollbar(
@@ -157,6 +186,72 @@ fn render_scrollbar(
                 ch,
                 Style::default().fg(ratatui::style::Color::DarkGray),
             );
+        }
+    }
+}
+
+const TOOL_OUTPUT_COLLAPSED_LINES: usize = 3;
+
+fn render_tool_message(
+    msg: &crate::app::ChatMessage,
+    app: &App,
+    theme: &Theme,
+    wrap_width: usize,
+    lines: &mut Vec<Line<'static>>,
+) {
+    let name = msg.tool_name.as_deref().unwrap_or("tool");
+    let prefix = format!("[{name}] ");
+    let content_lines: Vec<&str> = msg.content.lines().collect();
+
+    // First line is always the command ($ ...)
+    let cmd_line = content_lines.first().copied().unwrap_or("");
+    let status_span = if msg.streaming {
+        let len = BRAILLE_SIX.symbols.len();
+        let idx = usize::try_from(
+            app.throbber_state()
+                .index()
+                .rem_euclid(i8::try_from(len).unwrap_or(i8::MAX)),
+        )
+        .unwrap_or(0);
+        let symbol = BRAILLE_SIX.symbols[idx];
+        Span::styled(format!("{symbol} "), theme.streaming_cursor)
+    } else {
+        Span::styled("\u{2714} ".to_string(), theme.highlight)
+    };
+    let indent = " ".repeat(prefix.len());
+    let cmd_spans: Vec<Span<'static>> = vec![
+        Span::styled(prefix, theme.highlight),
+        status_span,
+        Span::styled(cmd_line.to_string(), theme.tool_command),
+    ];
+    lines.extend(wrap_spans(cmd_spans, wrap_width));
+
+    // Output lines (everything after the command)
+    if content_lines.len() > 1 {
+        let output_lines = &content_lines[1..];
+        let total = output_lines.len();
+        let show_all = app.tool_expanded() || total <= TOOL_OUTPUT_COLLAPSED_LINES;
+        let visible = if show_all {
+            output_lines
+        } else {
+            &output_lines[..TOOL_OUTPUT_COLLAPSED_LINES]
+        };
+
+        for line in visible {
+            let spans = vec![
+                Span::styled(indent.clone(), Style::default()),
+                Span::styled((*line).to_string(), theme.code_block),
+            ];
+            lines.extend(wrap_spans(spans, wrap_width));
+        }
+
+        if !show_all {
+            let remaining = total - TOOL_OUTPUT_COLLAPSED_LINES;
+            let hint = format!("{indent}... ({remaining} more lines, press 'e' to expand)");
+            lines.push(Line::from(Span::styled(
+                hint,
+                Style::default().add_modifier(Modifier::DIM),
+            )));
         }
     }
 }

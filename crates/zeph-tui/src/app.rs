@@ -18,6 +18,7 @@ pub enum MessageRole {
     User,
     Assistant,
     System,
+    Tool,
 }
 
 #[derive(Debug, Clone)]
@@ -25,6 +26,7 @@ pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
     pub streaming: bool,
+    pub tool_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,16 +42,21 @@ pub struct ConfirmState {
     pub response_tx: Option<oneshot::Sender<bool>>,
 }
 
+#[allow(clippy::struct_excessive_bools)]
 pub struct App {
     input: String,
     cursor_position: usize,
     input_mode: InputMode,
     messages: Vec<ChatMessage>,
     show_splash: bool,
+    show_side_panels: bool,
     scroll_offset: usize,
     pub metrics: MetricsSnapshot,
     metrics_rx: Option<watch::Receiver<MetricsSnapshot>>,
     active_panel: Panel,
+    tool_expanded: bool,
+    status_label: Option<String>,
+    throbber_state: throbber_widgets_tui::ThrobberState,
     confirm_state: Option<ConfirmState>,
     pub should_quit: bool,
     user_input_tx: mpsc::Sender<String>,
@@ -68,10 +75,14 @@ impl App {
             input_mode: InputMode::Insert,
             messages: Vec::new(),
             show_splash: true,
+            show_side_panels: true,
             scroll_offset: 0,
             metrics: MetricsSnapshot::default(),
             metrics_rx: None,
             active_panel: Panel::Chat,
+            tool_expanded: false,
+            status_label: None,
+            throbber_state: throbber_widgets_tui::ThrobberState::default(),
             confirm_state: None,
             should_quit: false,
             user_input_tx,
@@ -82,6 +93,11 @@ impl App {
     #[must_use]
     pub fn show_splash(&self) -> bool {
         self.show_splash
+    }
+
+    #[must_use]
+    pub fn show_side_panels(&self) -> bool {
+        self.show_side_panels
     }
 
     pub fn load_history(&mut self, messages: &[(&str, &str)]) {
@@ -95,6 +111,7 @@ impl App {
                 role,
                 content: content.to_owned(),
                 streaming: false,
+                tool_name: None,
             });
         }
         if !self.messages.is_empty() {
@@ -141,13 +158,42 @@ impl App {
         self.scroll_offset
     }
 
+    #[must_use]
+    pub fn tool_expanded(&self) -> bool {
+        self.tool_expanded
+    }
+
+    #[must_use]
+    pub fn status_label(&self) -> Option<&str> {
+        self.status_label.as_deref()
+    }
+
+    #[must_use]
+    pub fn has_running_tool(&self) -> bool {
+        self.messages
+            .last()
+            .is_some_and(|m| m.role == MessageRole::Tool && m.streaming)
+    }
+
+    #[must_use]
+    pub fn throbber_state(&self) -> &throbber_widgets_tui::ThrobberState {
+        &self.throbber_state
+    }
+
+    pub fn throbber_state_mut(&mut self) -> &mut throbber_widgets_tui::ThrobberState {
+        &mut self.throbber_state
+    }
+
     /// # Errors
     ///
     /// Returns an error if event handling fails.
     pub fn handle_event(&mut self, event: AppEvent) -> anyhow::Result<()> {
         match event {
             AppEvent::Key(key) => self.handle_key(key),
-            AppEvent::Tick | AppEvent::Resize(_, _) => {}
+            AppEvent::Tick => {
+                self.throbber_state.calc_next();
+            }
+            AppEvent::Resize(_, _) => {}
             AppEvent::MouseScroll(delta) => {
                 if self.confirm_state.is_none() {
                     if delta > 0 {
@@ -169,6 +215,7 @@ impl App {
     pub fn handle_agent_event(&mut self, event: AgentEvent) {
         match event {
             AgentEvent::Chunk(text) => {
+                self.status_label = None;
                 if let Some(last) = self.messages.last_mut()
                     && last.role == MessageRole::Assistant
                     && last.streaming
@@ -179,16 +226,21 @@ impl App {
                         role: MessageRole::Assistant,
                         content: text,
                         streaming: true,
+                        tool_name: None,
                     });
                 }
                 self.scroll_offset = 0;
             }
             AgentEvent::FullMessage(text) => {
-                self.messages.push(ChatMessage {
-                    role: MessageRole::Assistant,
-                    content: text,
-                    streaming: false,
-                });
+                self.status_label = None;
+                if !text.starts_with("[tool output]") {
+                    self.messages.push(ChatMessage {
+                        role: MessageRole::Assistant,
+                        content: text,
+                        streaming: false,
+                        tool_name: None,
+                    });
+                }
                 self.scroll_offset = 0;
             }
             AgentEvent::Flush => {
@@ -198,7 +250,45 @@ impl App {
                     last.streaming = false;
                 }
             }
-            AgentEvent::Typing => {}
+            AgentEvent::Typing => {
+                self.status_label = Some("thinking...".to_owned());
+            }
+            AgentEvent::Status(text) => {
+                self.status_label = Some(text);
+                self.scroll_offset = 0;
+            }
+            AgentEvent::ToolStart { tool_name, command } => {
+                self.status_label = None;
+                self.messages.push(ChatMessage {
+                    role: MessageRole::Tool,
+                    content: format!("$ {command}\n"),
+                    streaming: true,
+                    tool_name: Some(tool_name),
+                });
+                self.scroll_offset = 0;
+            }
+            AgentEvent::ToolOutputChunk { chunk, .. } => {
+                if let Some(msg) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::Tool && m.streaming)
+                {
+                    msg.content.push_str(&chunk);
+                }
+                self.scroll_offset = 0;
+            }
+            AgentEvent::ToolOutput { .. } => {
+                if let Some(msg) = self
+                    .messages
+                    .iter_mut()
+                    .rev()
+                    .find(|m| m.role == MessageRole::Tool && m.streaming)
+                {
+                    msg.streaming = false;
+                }
+                self.scroll_offset = 0;
+            }
             AgentEvent::ConfirmRequest {
                 prompt,
                 response_tx,
@@ -217,7 +307,7 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut ratatui::Frame) {
-        let layout = AppLayout::compute(frame.area());
+        let layout = AppLayout::compute(frame.area(), self.show_side_panels);
 
         self.draw_header(frame, layout.header);
         if self.show_splash {
@@ -321,6 +411,12 @@ impl App {
             KeyCode::End => {
                 self.scroll_offset = 0;
             }
+            KeyCode::Char('d') => {
+                self.show_side_panels = !self.show_side_panels;
+            }
+            KeyCode::Char('e') => {
+                self.tool_expanded = !self.tool_expanded;
+            }
             KeyCode::Tab => {
                 self.active_panel = match self.active_panel {
                     Panel::Chat => Panel::Skills,
@@ -400,6 +496,7 @@ impl App {
             role: MessageRole::User,
             content: text.clone(),
             streaming: false,
+            tool_name: None,
         });
         self.input.clear();
         self.cursor_position = 0;
@@ -773,6 +870,20 @@ mod tests {
         app.handle_event(AppEvent::Key(key)).unwrap();
         assert_eq!(app.input(), "a\nb");
         assert_eq!(app.cursor_position(), 2);
+    }
+
+    #[test]
+    fn d_toggles_side_panels() {
+        let (mut app, _rx, _tx) = make_app();
+        app.input_mode = InputMode::Normal;
+        assert!(app.show_side_panels());
+
+        let key = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+        app.handle_event(AppEvent::Key(key)).unwrap();
+        assert!(!app.show_side_panels());
+
+        app.handle_event(AppEvent::Key(key)).unwrap();
+        assert!(app.show_side_panels());
     }
 
     #[test]

@@ -100,11 +100,16 @@ async fn main() -> anyhow::Result<()> {
     let tui_active = is_tui_requested();
     #[cfg(feature = "tui")]
     if tui_active {
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
         let file = std::fs::File::create("zeph.log").ok();
         if let Some(file) = file {
-            tracing_subscriber::fmt().with_writer(file).init();
+            tracing_subscriber::fmt()
+                .with_env_filter(filter)
+                .with_writer(file)
+                .init();
         } else {
-            tracing_subscriber::fmt::init();
+            tracing_subscriber::fmt().with_env_filter(filter).init();
         }
     } else {
         tracing_subscriber::fmt::init();
@@ -132,8 +137,11 @@ async fn main() -> anyhow::Result<()> {
     let mut config = Config::load(&config_path)?;
     config.resolve_secrets(vault.as_ref()).await?;
 
-    let provider = create_provider(&config)?;
+    let mut provider = create_provider(&config)?;
     let embed_model = effective_embedding_model(&config);
+
+    let (status_tx, status_rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    provider.set_status_tx(status_tx);
 
     health_check(&provider).await;
 
@@ -194,6 +202,15 @@ async fn main() -> anyhow::Result<()> {
     {
         shell_executor = shell_executor.with_audit(logger);
     }
+
+    #[cfg(feature = "tui")]
+    let tool_event_rx = if tui_handle.is_some() {
+        let (tool_tx, tool_rx) = tokio::sync::mpsc::unbounded_channel::<zeph_tools::ToolEvent>();
+        shell_executor = shell_executor.with_tool_event_tx(tool_tx);
+        Some(tool_rx)
+    } else {
+        None
+    };
     let scrape_executor = WebScrapeExecutor::new(&config.tools.scrape);
 
     #[cfg(feature = "mcp")]
@@ -312,6 +329,13 @@ async fn main() -> anyhow::Result<()> {
             app = app.with_metrics_rx(rx);
         }
 
+        let agent_tx = tui_handle.agent_tx;
+        tokio::spawn(forward_status_to_tui(status_rx, agent_tx.clone()));
+
+        if let Some(tool_rx) = tool_event_rx {
+            tokio::spawn(forward_tool_events_to_tui(tool_rx, agent_tx));
+        }
+
         let tui_task = tokio::spawn(zeph_tui::run_tui(app, event_rx));
         let agent_task = tokio::spawn(async move { agent.run().await });
 
@@ -325,7 +349,63 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
+    tokio::spawn(forward_status_to_stderr(status_rx));
     agent.run().await
+}
+
+async fn forward_status_to_stderr(mut rx: tokio::sync::mpsc::UnboundedReceiver<String>) {
+    while let Some(msg) = rx.recv().await {
+        eprintln!("[status] {msg}");
+    }
+}
+
+#[cfg(feature = "tui")]
+async fn forward_status_to_tui(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    tx: tokio::sync::mpsc::Sender<zeph_tui::AgentEvent>,
+) {
+    while let Some(msg) = rx.recv().await {
+        if tx.send(zeph_tui::AgentEvent::Status(msg)).await.is_err() {
+            break;
+        }
+    }
+}
+
+#[cfg(feature = "tui")]
+async fn forward_tool_events_to_tui(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<zeph_tools::ToolEvent>,
+    tx: tokio::sync::mpsc::Sender<zeph_tui::AgentEvent>,
+) {
+    while let Some(event) = rx.recv().await {
+        let agent_event = match event {
+            zeph_tools::ToolEvent::Started { tool_name, command } => {
+                zeph_tui::AgentEvent::ToolStart { tool_name, command }
+            }
+            zeph_tools::ToolEvent::OutputChunk {
+                tool_name,
+                command,
+                chunk,
+            } => zeph_tui::AgentEvent::ToolOutputChunk {
+                tool_name,
+                command,
+                chunk,
+            },
+            zeph_tools::ToolEvent::Completed {
+                tool_name,
+                command,
+                output,
+                success,
+            } => zeph_tui::AgentEvent::ToolOutput {
+                tool_name,
+                command,
+                output,
+                success,
+            },
+        };
+        if tx.send(agent_event).await.is_err() {
+            break;
+        }
+    }
 }
 
 async fn health_check(provider: &AnyProvider) {
@@ -854,6 +934,7 @@ fn resolve_config_path() -> PathBuf {
 #[cfg(feature = "tui")]
 struct TuiHandle {
     user_tx: tokio::sync::mpsc::Sender<String>,
+    agent_tx: tokio::sync::mpsc::Sender<zeph_tui::AgentEvent>,
     agent_rx: tokio::sync::mpsc::Receiver<zeph_tui::AgentEvent>,
 }
 
@@ -870,8 +951,13 @@ fn create_channel_with_tui(config: &Config) -> anyhow::Result<(AnyChannel, Optio
     if is_tui_requested() {
         let (user_tx, user_rx) = tokio::sync::mpsc::channel(32);
         let (agent_tx, agent_rx) = tokio::sync::mpsc::channel(256);
+        let agent_tx_clone = agent_tx.clone();
         let channel = TuiChannel::new(user_rx, agent_tx);
-        let handle = TuiHandle { user_tx, agent_rx };
+        let handle = TuiHandle {
+            user_tx,
+            agent_tx: agent_tx_clone,
+            agent_rx,
+        };
         return Ok((AnyChannel::Tui(channel), Some(handle)));
     }
     let channel = create_channel_inner(config)?;
