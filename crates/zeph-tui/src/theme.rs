@@ -16,6 +16,7 @@ pub struct Theme {
     pub code_block: Style,
     pub streaming_cursor: Style,
     pub tool_command: Style,
+    pub assistant_accent: Style,
 }
 
 impl Default for Theme {
@@ -33,17 +34,18 @@ impl Default for Theme {
             panel_title: Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-            highlight: Style::default().fg(Color::Green),
+            highlight: Style::default().fg(Color::Rgb(215, 150, 60)),
             error: Style::default().fg(Color::Red),
             thinking_message: Style::default().fg(Color::DarkGray),
             code_inline: Style::default().fg(Color::Yellow),
-            code_block: Style::default().fg(Color::Green),
+            code_block: Style::default().fg(Color::Rgb(190, 175, 145)),
             streaming_cursor: Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::SLOW_BLINK),
             tool_command: Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
+            assistant_accent: Style::default().fg(Color::Rgb(185, 85, 25)),
         }
     }
 }

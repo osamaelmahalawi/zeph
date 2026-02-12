@@ -21,58 +21,29 @@ pub fn render(app: &mut App, frame: &mut Frame, area: Rect) -> usize {
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
-    for msg in app.messages() {
+    for (idx, msg) in app.messages().iter().enumerate() {
+        let accent = match msg.role {
+            MessageRole::User => theme.user_message,
+            MessageRole::Assistant => theme.assistant_accent,
+            MessageRole::Tool => theme.tool_command,
+            MessageRole::System => theme.system_message,
+        };
+
+        if idx > 0 {
+            let sep = "\u{2500}".repeat(wrap_width);
+            lines.push(Line::from(Span::styled(sep, theme.system_message)));
+        }
+
+        let msg_start = lines.len();
+
         if msg.role == MessageRole::Tool {
             render_tool_message(msg, app, &theme, wrap_width, &mut lines);
-            lines.push(Line::default());
-            continue;
-        }
-
-        let (prefix, base_style) = match msg.role {
-            MessageRole::User => ("[user] ", theme.user_message),
-            MessageRole::Assistant => ("[zeph] ", theme.assistant_message),
-            MessageRole::System => ("[system] ", theme.system_message),
-            MessageRole::Tool => unreachable!(),
-        };
-
-        let indent = " ".repeat(prefix.len());
-        let is_assistant = msg.role == MessageRole::Assistant;
-
-        let styled_lines = if is_assistant {
-            render_with_thinking(&msg.content, base_style, &theme)
         } else {
-            render_md(&msg.content, base_style, &theme)
-        };
-
-        for (i, spans) in styled_lines.iter().enumerate() {
-            let mut line_spans = Vec::with_capacity(spans.len() + 1);
-            let pfx = if i == 0 {
-                prefix.to_string()
-            } else {
-                indent.clone()
-            };
-            let pfx_style = if is_assistant && !spans.is_empty() {
-                spans[0].style
-            } else {
-                base_style
-            };
-            line_spans.push(Span::styled(pfx, pfx_style));
-            line_spans.extend(spans.iter().cloned());
-
-            let is_last_line = i == styled_lines.len() - 1;
-            if msg.streaming && is_last_line {
-                line_spans.push(Span::styled("\u{258c}".to_string(), theme.streaming_cursor));
-            }
-
-            lines.extend(wrap_spans(line_spans, wrap_width));
+            render_chat_message(msg, &theme, wrap_width, &mut lines);
         }
 
-        if styled_lines.is_empty() {
-            let mut pfx_spans = vec![Span::styled(prefix.to_string(), base_style)];
-            if msg.streaming {
-                pfx_spans.push(Span::styled("\u{258c}".to_string(), theme.streaming_cursor));
-            }
-            lines.extend(wrap_spans(pfx_spans, wrap_width));
+        for line in &mut lines[msg_start..] {
+            line.spans.insert(0, Span::styled("\u{258e} ", accent));
         }
 
         lines.push(Line::default());
@@ -118,6 +89,60 @@ pub fn render(app: &mut App, frame: &mut Frame, area: Rect) -> usize {
     render_thinking(app, frame, area, &theme);
 
     max_scroll
+}
+
+fn render_chat_message(
+    msg: &crate::app::ChatMessage,
+    theme: &Theme,
+    wrap_width: usize,
+    lines: &mut Vec<Line<'static>>,
+) {
+    let (prefix, base_style) = match msg.role {
+        MessageRole::User => ("[user] ", theme.user_message),
+        MessageRole::Assistant => ("[zeph] ", theme.assistant_message),
+        MessageRole::System => ("[system] ", theme.system_message),
+        MessageRole::Tool => unreachable!(),
+    };
+
+    let indent = " ".repeat(prefix.len());
+    let is_assistant = msg.role == MessageRole::Assistant;
+
+    let styled_lines = if is_assistant {
+        render_with_thinking(&msg.content, base_style, theme)
+    } else {
+        render_md(&msg.content, base_style, theme)
+    };
+
+    for (i, spans) in styled_lines.iter().enumerate() {
+        let mut line_spans = Vec::with_capacity(spans.len() + 1);
+        let pfx = if i == 0 {
+            prefix.to_string()
+        } else {
+            indent.clone()
+        };
+        let pfx_style = if is_assistant && !spans.is_empty() {
+            spans[0].style
+        } else {
+            base_style
+        };
+        line_spans.push(Span::styled(pfx, pfx_style));
+        line_spans.extend(spans.iter().cloned());
+
+        let is_last_line = i == styled_lines.len() - 1;
+        if msg.streaming && is_last_line {
+            line_spans.push(Span::styled("\u{258c}".to_string(), theme.streaming_cursor));
+        }
+
+        lines.extend(wrap_spans(line_spans, wrap_width));
+    }
+
+    if styled_lines.is_empty() {
+        let mut pfx_spans = vec![Span::styled(prefix.to_string(), base_style)];
+        if msg.streaming {
+            pfx_spans.push(Span::styled("\u{258c}".to_string(), theme.streaming_cursor));
+        }
+        lines.extend(wrap_spans(pfx_spans, wrap_width));
+    }
 }
 
 fn render_thinking(app: &mut App, frame: &mut Frame, area: Rect, theme: &Theme) {
