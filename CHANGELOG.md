@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-02-12
+
+### Added
+- New `zeph-index` crate: AST-based code indexing and semantic retrieval pipeline
+  - Language detection and grammar registry with feature-gated tree-sitter grammars (Rust, Python, JavaScript, TypeScript, Go, Bash, TOML, JSON, Markdown)
+  - AST-based chunker with cAST-inspired greedy sibling merge and recursive decomposition (target 600 non-ws chars per chunk)
+  - Contextualized embedding text generation for improved retrieval quality
+  - Dual-write storage layer (Qdrant vector search + SQLite metadata) with INT8 scalar quantization
+  - Incremental indexer with .gitignore-aware file walking and content-hash change detection
+  - Hybrid retriever with query classification (Semantic/Grep/Hybrid) and budget-aware result packing
+  - Lightweight repo map generation (tree-sitter signature extraction, budget-constrained output)
+- `code_context` slot in `BudgetAllocation` for code RAG injection into agent context
+- `inject_code_context()` method in Agent for transient code chunk injection before semantic recall
+
 ## [0.9.2] - 2026-02-12
 
 ### Added
