@@ -26,6 +26,9 @@ use zeph_memory::semantic::estimate_tokens;
 const MAX_SHELL_ITERATIONS: usize = 3;
 const RECALL_PREFIX: &str = "[semantic recall]\n";
 const CODE_CONTEXT_PREFIX: &str = "[code context]\n";
+const TOOL_OUTPUT_PREFIX: &str = "[tool output]\n```\n";
+const TOOL_OUTPUT_SUFFIX: &str = "\n```";
+const HISTORY_TOOL_OUTPUT_MAX_LINES: usize = 3;
 
 pub struct Agent<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> {
     provider: P,
@@ -508,11 +511,14 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             let mut loaded = 0;
             let mut skipped = 0;
 
-            for msg in history {
+            for mut msg in history {
                 if msg.content.trim().is_empty() {
                     tracing::warn!("skipping empty message from history (role: {:?})", msg.role);
                     skipped += 1;
                     continue;
+                }
+                if msg.content.starts_with(TOOL_OUTPUT_PREFIX) {
+                    msg.content = collapse_tool_output(&msg.content);
                 }
                 self.messages.push(msg);
                 loaded += 1;
@@ -1956,6 +1962,24 @@ async fn write_skill_file(
     anyhow::bail!("skill directory not found for {skill_name}")
 }
 
+fn collapse_tool_output(content: &str) -> String {
+    let Some(rest) = content.strip_prefix(TOOL_OUTPUT_PREFIX) else {
+        return content.to_string();
+    };
+    let Some(body) = rest.strip_suffix(TOOL_OUTPUT_SUFFIX) else {
+        return content.to_string();
+    };
+
+    let lines: Vec<&str> = body.lines().collect();
+    if lines.len() <= HISTORY_TOOL_OUTPUT_MAX_LINES {
+        return content.to_string();
+    }
+
+    let preview = lines[..HISTORY_TOOL_OUTPUT_MAX_LINES].join("\n");
+    let hidden = lines.len() - HISTORY_TOOL_OUTPUT_MAX_LINES;
+    format!("{TOOL_OUTPUT_PREFIX}{preview}\n... [{hidden} lines hidden]{TOOL_OUTPUT_SUFFIX}")
+}
+
 /// Naive parser for `SQLite` datetime strings (e.g. "2024-01-15 10:30:00") to Unix seconds.
 #[cfg(feature = "self-learning")]
 fn chrono_parse_sqlite(s: &str) -> Result<u64, ()> {
@@ -3254,5 +3278,35 @@ mod agent_tests {
         let agent2 = Agent::new(provider2, channel2, registry2, None, 5, executor2)
             .with_tool_summarization(false);
         assert!(!agent2.summarize_tool_output_enabled);
+    }
+
+    #[test]
+    fn collapse_tool_output_short_passthrough() {
+        let input = "[tool output]\n```\nline1\nline2\n```";
+        assert_eq!(collapse_tool_output(input), input);
+    }
+
+    #[test]
+    fn collapse_tool_output_exact_limit() {
+        let input = "[tool output]\n```\nline1\nline2\nline3\n```";
+        assert_eq!(collapse_tool_output(input), input);
+    }
+
+    #[test]
+    fn collapse_tool_output_truncates_long() {
+        let input = "[tool output]\n```\nline1\nline2\nline3\nline4\nline5\n```";
+        let result = collapse_tool_output(input);
+        assert!(result.contains("line1"));
+        assert!(result.contains("line2"));
+        assert!(result.contains("line3"));
+        assert!(!result.contains("line4"));
+        assert!(!result.contains("line5"));
+        assert!(result.contains("[2 lines hidden]"));
+    }
+
+    #[test]
+    fn collapse_tool_output_ignores_non_tool() {
+        let input = "regular user message";
+        assert_eq!(collapse_tool_output(input), input);
     }
 }
