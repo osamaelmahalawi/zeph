@@ -44,12 +44,6 @@ pub fn render(app: &mut App, frame: &mut Frame, area: Rect) -> usize {
 
         for line in &mut lines[msg_start..] {
             line.spans.insert(0, Span::styled("\u{258e} ", accent));
-            let used: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            let pad = wrap_width.saturating_sub(used + 1);
-            if pad > 0 {
-                line.spans.push(Span::raw(" ".repeat(pad)));
-            }
-            line.spans.push(Span::styled("\u{2590}", accent));
         }
     }
 
