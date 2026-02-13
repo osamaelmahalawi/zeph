@@ -107,7 +107,23 @@ impl App {
     }
 
     pub fn load_history(&mut self, messages: &[(&str, &str)]) {
+        const TOOL_PREFIX: &str = "[tool output]\n```\n";
+        const TOOL_SUFFIX: &str = "\n```";
+
         for &(role_str, content) in messages {
+            if role_str == "user"
+                && let Some(rest) = content.strip_prefix(TOOL_PREFIX)
+                && let Some(body) = rest.strip_suffix(TOOL_SUFFIX)
+            {
+                self.messages.push(ChatMessage {
+                    role: MessageRole::Tool,
+                    content: body.to_owned(),
+                    streaming: false,
+                    tool_name: None,
+                });
+                continue;
+            }
+
             let role = match role_str {
                 "user" => MessageRole::User,
                 "assistant" => MessageRole::Assistant,
@@ -972,5 +988,22 @@ mod tests {
         assert_eq!(app.scroll_offset(), 5);
         app.handle_event(AppEvent::MouseScroll(-1)).unwrap();
         assert_eq!(app.scroll_offset(), 5);
+    }
+
+    #[test]
+    fn load_history_recognizes_tool_output() {
+        let (mut app, _rx, _tx) = make_app();
+        app.load_history(&[
+            ("user", "hello"),
+            ("assistant", "hi there"),
+            ("user", "[tool output]\n```\n$ echo hello\nhello\n```"),
+            ("assistant", "done"),
+        ]);
+        assert_eq!(app.messages().len(), 4);
+        assert_eq!(app.messages()[0].role, MessageRole::User);
+        assert_eq!(app.messages()[1].role, MessageRole::Assistant);
+        assert_eq!(app.messages()[2].role, MessageRole::Tool);
+        assert_eq!(app.messages()[2].content, "$ echo hello\nhello");
+        assert_eq!(app.messages()[3].role, MessageRole::Assistant);
     }
 }
