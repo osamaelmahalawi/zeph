@@ -250,24 +250,24 @@ fn render_tool_message(
     // Output lines (everything after the command)
     if content_lines.len() > 1 {
         let output_lines = &content_lines[1..];
-        let total = output_lines.len();
-        let show_all = app.tool_expanded() || total <= TOOL_OUTPUT_COLLAPSED_LINES;
-        let visible = if show_all {
-            output_lines
-        } else {
-            &output_lines[..TOOL_OUTPUT_COLLAPSED_LINES]
-        };
 
-        for line in visible {
+        let mut wrapped: Vec<Line<'static>> = Vec::new();
+        for line in output_lines {
             let spans = vec![
                 Span::styled(indent.clone(), Style::default()),
                 Span::styled((*line).to_string(), theme.code_block),
             ];
-            lines.extend(wrap_spans(spans, wrap_width));
+            wrapped.extend(wrap_spans(spans, wrap_width));
         }
 
-        if !show_all {
-            let remaining = total - TOOL_OUTPUT_COLLAPSED_LINES;
+        let total_visual = wrapped.len();
+        let show_all = app.tool_expanded() || total_visual <= TOOL_OUTPUT_COLLAPSED_LINES;
+
+        if show_all {
+            lines.extend(wrapped);
+        } else {
+            lines.extend(wrapped.into_iter().take(TOOL_OUTPUT_COLLAPSED_LINES));
+            let remaining = total_visual - TOOL_OUTPUT_COLLAPSED_LINES;
             let hint = format!("{indent}... ({remaining} more lines, press 'e' to expand)");
             lines.push(Line::from(Span::styled(
                 hint,
