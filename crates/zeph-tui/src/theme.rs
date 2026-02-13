@@ -30,7 +30,10 @@ impl Default for Theme {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             status_bar: Style::default().fg(Color::White).bg(Color::DarkGray),
-            header: Style::default().fg(Color::White).bg(Color::Blue),
+            header: Style::default()
+                .fg(Color::Rgb(200, 220, 255))
+                .bg(Color::Rgb(20, 40, 80))
+                .add_modifier(Modifier::BOLD),
             panel_border: Style::default().fg(Color::Gray),
             panel_title: Style::default()
                 .fg(Color::White)
