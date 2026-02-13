@@ -17,6 +17,7 @@ pub struct Theme {
     pub streaming_cursor: Style,
     pub tool_command: Style,
     pub assistant_accent: Style,
+    pub tool_accent: Style,
 }
 
 impl Default for Theme {
@@ -46,6 +47,7 @@ impl Default for Theme {
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
             assistant_accent: Style::default().fg(Color::Rgb(185, 85, 25)),
+            tool_accent: Style::default().fg(Color::Rgb(140, 120, 50)),
         }
     }
 }

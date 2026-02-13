@@ -61,6 +61,9 @@ pub struct App {
     pub should_quit: bool,
     user_input_tx: mpsc::Sender<String>,
     agent_event_rx: mpsc::Receiver<AgentEvent>,
+    input_history: Vec<String>,
+    history_index: Option<usize>,
+    draft_input: String,
 }
 
 impl App {
@@ -87,6 +90,9 @@ impl App {
             should_quit: false,
             user_input_tx,
             agent_event_rx,
+            input_history: Vec::new(),
+            history_index: None,
+            draft_input: String::new(),
         }
     }
 
@@ -463,6 +469,40 @@ impl App {
                     self.input.remove(byte_offset);
                 }
             }
+            KeyCode::Up => {
+                match self.history_index {
+                    None => {
+                        if self.input_history.is_empty() {
+                            return;
+                        }
+                        self.draft_input = self.input.clone();
+                        let idx = self.input_history.len() - 1;
+                        self.history_index = Some(idx);
+                        self.input.clone_from(&self.input_history[idx]);
+                    }
+                    Some(0) => return,
+                    Some(i) => {
+                        let idx = i - 1;
+                        self.history_index = Some(idx);
+                        self.input.clone_from(&self.input_history[idx]);
+                    }
+                }
+                self.cursor_position = self.char_count();
+            }
+            KeyCode::Down => {
+                let Some(i) = self.history_index else {
+                    return;
+                };
+                if i + 1 < self.input_history.len() {
+                    let idx = i + 1;
+                    self.history_index = Some(idx);
+                    self.input.clone_from(&self.input_history[idx]);
+                } else {
+                    self.history_index = None;
+                    self.input = std::mem::take(&mut self.draft_input);
+                }
+                self.cursor_position = self.char_count();
+            }
             KeyCode::Left => {
                 self.cursor_position = self.cursor_position.saturating_sub(1);
             }
@@ -492,6 +532,9 @@ impl App {
             return;
         }
         self.show_splash = false;
+        self.input_history.push(text.clone());
+        self.history_index = None;
+        self.draft_input.clear();
         self.messages.push(ChatMessage {
             role: MessageRole::User,
             content: text.clone(),
