@@ -97,10 +97,12 @@ impl SqliteStore {
         limit: u32,
     ) -> anyhow::Result<Vec<Message>> {
         let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT role, content FROM messages \
-             WHERE conversation_id = ? \
-             ORDER BY id ASC \
-             LIMIT ?",
+            "SELECT role, content FROM (\
+                SELECT role, content, id FROM messages \
+                WHERE conversation_id = ? \
+                ORDER BY id DESC \
+                LIMIT ?\
+             ) ORDER BY id ASC",
         )
         .bind(conversation_id)
         .bind(limit)
@@ -840,6 +842,9 @@ mod tests {
 
         let history = store.load_history(cid, 3).await.unwrap();
         assert_eq!(history.len(), 3);
+        assert_eq!(history[0].content, "msg 7");
+        assert_eq!(history[1].content, "msg 8");
+        assert_eq!(history[2].content, "msg 9");
     }
 
     #[tokio::test]
