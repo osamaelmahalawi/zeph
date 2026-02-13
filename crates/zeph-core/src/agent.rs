@@ -26,8 +26,11 @@ use zeph_memory::semantic::estimate_tokens;
 const MAX_SHELL_ITERATIONS: usize = 3;
 const RECALL_PREFIX: &str = "[semantic recall]\n";
 const CODE_CONTEXT_PREFIX: &str = "[code context]\n";
-const TOOL_OUTPUT_PREFIX: &str = "[tool output]\n```\n";
 const TOOL_OUTPUT_SUFFIX: &str = "\n```";
+
+fn format_tool_output(tool_name: &str, body: &str) -> String {
+    format!("[tool output: {tool_name}]\n```\n{body}{TOOL_OUTPUT_SUFFIX}")
+}
 
 pub struct Agent<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> {
     provider: P,
@@ -1362,7 +1365,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
         self.messages
             .iter()
             .rev()
-            .find(|m| m.role == Role::User && !m.content.starts_with("[tool output]"))
+            .find(|m| m.role == Role::User && !m.content.starts_with("[tool output"))
             .map_or("", |m| m.content.as_str())
     }
 
@@ -1435,8 +1438,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                 }
 
                 let processed = self.maybe_summarize_tool_output(&output.summary).await;
-                let formatted_output =
-                    format!("{TOOL_OUTPUT_PREFIX}{processed}{TOOL_OUTPUT_SUFFIX}");
+                let formatted_output = format_tool_output(&output.tool_name, &processed);
                 let display = self.maybe_redact(&formatted_output);
                 self.channel.send(&display).await?;
 
@@ -1463,8 +1465,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                 if self.channel.confirm(&prompt).await? {
                     if let Ok(Some(out)) = self.tool_executor.execute_confirmed(response).await {
                         let processed = self.maybe_summarize_tool_output(&out.summary).await;
-                        let formatted =
-                            format!("{TOOL_OUTPUT_PREFIX}{processed}{TOOL_OUTPUT_SUFFIX}");
+                        let formatted = format_tool_output(&out.tool_name, &processed);
                         let display = self.maybe_redact(&formatted);
                         self.channel.send(&display).await?;
                         self.messages.push(Message {
@@ -2413,6 +2414,7 @@ mod agent_tests {
         let _channel = MockChannel::new(vec!["execute tool".to_string()]);
         let registry = create_test_registry();
         let executor = MockToolExecutor::new(vec![Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: "tool executed successfully".to_string(),
             blocks_executed: 1,
         }))]);
@@ -2608,6 +2610,7 @@ mod agent_tests {
         let registry = create_test_registry();
         let executor = MockToolExecutor::new(vec![
             Ok(Some(ToolOutput {
+                tool_name: "bash".to_string(),
                 summary: "[error] command failed [exit code 1]".to_string(),
                 blocks_executed: 1,
             })),
@@ -2626,6 +2629,7 @@ mod agent_tests {
         let channel = MockChannel::new(vec!["test".to_string()]);
         let registry = create_test_registry();
         let executor = MockToolExecutor::new(vec![Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: "   ".to_string(),
             blocks_executed: 1,
         }))]);
@@ -2716,6 +2720,7 @@ mod agent_tests {
         let registry = create_test_registry();
         let executor = MockToolExecutor::new(vec![
             Ok(Some(ToolOutput {
+                tool_name: "bash".to_string(),
                 summary: "step 1 complete".to_string(),
                 blocks_executed: 1,
             })),
@@ -2742,6 +2747,7 @@ mod agent_tests {
         let mut outputs = vec![];
         for _ in 0..10 {
             outputs.push(Ok(Some(ToolOutput {
+                tool_name: "bash".to_string(),
                 summary: "continuing".to_string(),
                 blocks_executed: 1,
             })));
@@ -3160,7 +3166,7 @@ mod agent_tests {
         });
         agent.messages.push(Message {
             role: Role::User,
-            content: "[tool output]\nsome output".to_string(),
+            content: "[tool output: bash]\nsome output".to_string(),
         });
 
         assert_eq!(agent.last_user_query(), "hello");

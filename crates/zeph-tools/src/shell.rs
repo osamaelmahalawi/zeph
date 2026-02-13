@@ -163,6 +163,7 @@ impl ShellExecutor {
         }
 
         Ok(Some(ToolOutput {
+            tool_name: "bash".to_owned(),
             summary: outputs.join("\n\n"),
             blocks_executed,
         }))

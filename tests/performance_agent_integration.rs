@@ -134,6 +134,7 @@ impl ToolExecutor for InstrumentedMockExecutor {
 
         if has_blocks {
             Ok(Some(ToolOutput {
+                tool_name: "bash".to_string(),
                 summary: "$ echo test\ntest".to_string(),
                 blocks_executed: 1,
             }))

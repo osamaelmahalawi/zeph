@@ -3,6 +3,7 @@ use std::fmt;
 /// Structured result from tool execution.
 #[derive(Debug, Clone)]
 pub struct ToolOutput {
+    pub tool_name: String,
     pub summary: String,
     pub blocks_executed: u32,
 }
@@ -125,6 +126,7 @@ mod tests {
     #[test]
     fn tool_output_display() {
         let output = ToolOutput {
+            tool_name: "bash".to_owned(),
             summary: "$ echo hello\nhello".to_owned(),
             blocks_executed: 1,
         };

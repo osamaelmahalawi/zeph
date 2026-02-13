@@ -101,6 +101,7 @@ impl ToolExecutor for WebScrapeExecutor {
         }
 
         Ok(Some(ToolOutput {
+            tool_name: "web-scrape".to_owned(),
             summary: outputs.join("\n\n"),
             blocks_executed,
         }))

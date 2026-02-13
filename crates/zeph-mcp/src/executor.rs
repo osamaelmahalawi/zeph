@@ -64,6 +64,7 @@ impl ToolExecutor for McpToolExecutor {
         }
 
         Ok(Some(ToolOutput {
+            tool_name: "mcp".to_owned(),
             summary: outputs.join("\n\n"),
             blocks_executed,
         }))

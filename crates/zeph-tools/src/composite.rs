@@ -42,6 +42,7 @@ mod tests {
     impl ToolExecutor for MatchingExecutor {
         async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
             Ok(Some(ToolOutput {
+                tool_name: "test".to_owned(),
                 summary: "matched".to_owned(),
                 blocks_executed: 1,
             }))
@@ -71,6 +72,7 @@ mod tests {
     impl ToolExecutor for SecondExecutor {
         async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
             Ok(Some(ToolOutput {
+                tool_name: "test".to_owned(),
                 summary: "second".to_owned(),
                 blocks_executed: 1,
             }))

@@ -310,6 +310,7 @@ struct OutputToolExecutor {
 impl ToolExecutor for OutputToolExecutor {
     async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
         Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: self.output.clone(),
             blocks_executed: 1,
         }))
@@ -321,6 +322,7 @@ struct EmptyOutputToolExecutor;
 impl ToolExecutor for EmptyOutputToolExecutor {
     async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
         Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: String::new(),
             blocks_executed: 1,
         }))
@@ -332,6 +334,7 @@ struct ErrorOutputToolExecutor;
 impl ToolExecutor for ErrorOutputToolExecutor {
     async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
         Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: "[error] command failed".into(),
             blocks_executed: 1,
         }))
@@ -359,6 +362,7 @@ impl ToolExecutor for ConfirmToolExecutor {
 
     async fn execute_confirmed(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
         Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: "confirmed output".into(),
             blocks_executed: 1,
         }))
@@ -391,6 +395,7 @@ struct ExitCodeToolExecutor;
 impl ToolExecutor for ExitCodeToolExecutor {
     async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
         Ok(Some(ToolOutput {
+            tool_name: "bash".to_string(),
             summary: "[exit code 1] process failed".into(),
             blocks_executed: 1,
         }))
@@ -2453,6 +2458,7 @@ mod self_learning {
     impl ToolExecutor for ErrorToolExecutor {
         async fn execute(&self, _response: &str) -> Result<Option<ToolOutput>, ToolError> {
             Ok(Some(ToolOutput {
+                tool_name: "bash".to_string(),
                 summary: "[error] command failed".into(),
                 blocks_executed: 1,
             }))

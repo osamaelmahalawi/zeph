@@ -107,19 +107,17 @@ impl App {
     }
 
     pub fn load_history(&mut self, messages: &[(&str, &str)]) {
-        const TOOL_PREFIX: &str = "[tool output]\n```\n";
         const TOOL_SUFFIX: &str = "\n```";
 
         for &(role_str, content) in messages {
             if role_str == "user"
-                && let Some(rest) = content.strip_prefix(TOOL_PREFIX)
-                && let Some(body) = rest.strip_suffix(TOOL_SUFFIX)
+                && let Some((tool_name, body)) = parse_tool_output(content, TOOL_SUFFIX)
             {
                 self.messages.push(ChatMessage {
                     role: MessageRole::Tool,
-                    content: body.to_owned(),
+                    content: body,
                     streaming: false,
-                    tool_name: None,
+                    tool_name: Some(tool_name),
                 });
                 continue;
             }
@@ -255,7 +253,7 @@ impl App {
             }
             AgentEvent::FullMessage(text) => {
                 self.status_label = None;
-                if !text.starts_with("[tool output]") {
+                if !text.starts_with("[tool output") {
                     self.messages.push(ChatMessage {
                         role: MessageRole::Assistant,
                         content: text,
@@ -567,6 +565,26 @@ impl App {
     }
 }
 
+fn parse_tool_output(content: &str, suffix: &str) -> Option<(String, String)> {
+    // New format: [tool output: name]
+    if let Some(rest) = content.strip_prefix("[tool output: ")
+        && let Some(header_end) = rest.find("]\n```\n")
+    {
+        let name = rest[..header_end].to_owned();
+        let body_start = header_end + "]\n```\n".len();
+        let body_part = &rest[body_start..];
+        let body = body_part.strip_suffix(suffix).unwrap_or(body_part);
+        return Some((name, body.to_owned()));
+    }
+    // Legacy format: [tool output] — infer tool name from body
+    if let Some(rest) = content.strip_prefix("[tool output]\n```\n") {
+        let body = rest.strip_suffix(suffix).unwrap_or(rest);
+        let name = if body.starts_with("$ ") { "bash" } else { "tool" };
+        return Some((name.to_owned(), body.to_owned()));
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -701,6 +719,15 @@ mod tests {
         assert_eq!(app.messages().len(), 1);
         assert!(!app.messages()[0].streaming);
         assert_eq!(app.messages()[0].content, "done");
+    }
+
+    #[test]
+    fn full_message_skips_tool_output_new_format() {
+        let (mut app, _rx, _tx) = make_app();
+        app.handle_agent_event(AgentEvent::FullMessage(
+            "[tool output: bash]\n```\n$ echo hi\nhi\n```".into(),
+        ));
+        assert!(app.messages().is_empty());
     }
 
     #[test]
@@ -992,19 +1019,43 @@ mod tests {
     }
 
     #[test]
-    fn load_history_recognizes_tool_output() {
+    fn load_history_recognizes_tool_output_new_format() {
         let (mut app, _rx, _tx) = make_app();
         app.load_history(&[
             ("user", "hello"),
             ("assistant", "hi there"),
-            ("user", "[tool output]\n```\n$ echo hello\nhello\n```"),
+            ("user", "[tool output: bash]\n```\n$ echo hello\nhello\n```"),
             ("assistant", "done"),
         ]);
         assert_eq!(app.messages().len(), 4);
         assert_eq!(app.messages()[0].role, MessageRole::User);
         assert_eq!(app.messages()[1].role, MessageRole::Assistant);
         assert_eq!(app.messages()[2].role, MessageRole::Tool);
+        assert_eq!(app.messages()[2].tool_name.as_deref(), Some("bash"));
         assert_eq!(app.messages()[2].content, "$ echo hello\nhello");
         assert_eq!(app.messages()[3].role, MessageRole::Assistant);
+    }
+
+    #[test]
+    fn load_history_recognizes_legacy_tool_output() {
+        let (mut app, _rx, _tx) = make_app();
+        app.load_history(&[
+            ("user", "[tool output]\n```\n$ ls\nfile.txt\n```"),
+        ]);
+        assert_eq!(app.messages().len(), 1);
+        assert_eq!(app.messages()[0].role, MessageRole::Tool);
+        assert_eq!(app.messages()[0].tool_name.as_deref(), Some("bash"));
+        assert_eq!(app.messages()[0].content, "$ ls\nfile.txt");
+    }
+
+    #[test]
+    fn load_history_legacy_non_bash_tool() {
+        let (mut app, _rx, _tx) = make_app();
+        app.load_history(&[
+            ("user", "[tool output]\n```\n[mcp:github:list]\nresults\n```"),
+        ]);
+        assert_eq!(app.messages().len(), 1);
+        assert_eq!(app.messages()[0].role, MessageRole::Tool);
+        assert_eq!(app.messages()[0].tool_name.as_deref(), Some("tool"));
     }
 }
