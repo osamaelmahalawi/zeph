@@ -7,6 +7,7 @@ pub struct AppLayout {
     pub skills: Rect,
     pub memory: Rect,
     pub resources: Rect,
+    pub activity: Rect,
     pub input: Rect,
     pub status: Rect,
 }
@@ -19,6 +20,7 @@ impl AppLayout {
             .constraints([
                 Constraint::Length(1),
                 Constraint::Min(10),
+                Constraint::Length(1),
                 Constraint::Length(3),
                 Constraint::Length(1),
             ])
@@ -32,8 +34,9 @@ impl AppLayout {
                 skills: Rect::default(),
                 memory: Rect::default(),
                 resources: Rect::default(),
-                input: outer[2],
-                status: outer[3],
+                activity: outer[2],
+                input: outer[3],
+                status: outer[4],
             };
         }
 
@@ -58,8 +61,9 @@ impl AppLayout {
             skills: side_split[0],
             memory: side_split[1],
             resources: side_split[2],
-            input: outer[2],
-            status: outer[3],
+            activity: outer[2],
+            input: outer[3],
+            status: outer[4],
         }
     }
 }

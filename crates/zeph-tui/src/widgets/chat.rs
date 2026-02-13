@@ -84,9 +84,25 @@ pub fn render(app: &mut App, frame: &mut Frame, area: Rect) -> usize {
         );
     }
 
-    render_thinking(app, frame, area, &theme);
-
     max_scroll
+}
+
+pub fn render_activity(app: &mut App, frame: &mut Frame, area: Rect) {
+    let Some(label) = app.status_label() else {
+        return;
+    };
+    if area.height == 0 || area.width == 0 {
+        return;
+    }
+    let theme = Theme::default();
+    let label = format!(" {label}");
+    let throbber = Throbber::default()
+        .label(label)
+        .style(theme.assistant_message)
+        .throbber_style(theme.highlight)
+        .throbber_set(BRAILLE_SIX)
+        .use_type(WhichUse::Spin);
+    frame.render_stateful_widget(throbber, area, app.throbber_state_mut());
 }
 
 fn render_chat_message(
@@ -141,25 +157,6 @@ fn render_chat_message(
         }
         lines.extend(wrap_spans(pfx_spans, wrap_width));
     }
-}
-
-fn render_thinking(app: &mut App, frame: &mut Frame, area: Rect, theme: &Theme) {
-    let Some(label) = app.status_label() else {
-        return;
-    };
-    if area.height <= 3 {
-        return;
-    }
-    let label = format!(" {label}");
-    let y = area.y + area.height.saturating_sub(2);
-    let throbber_area = Rect::new(area.x + 1, y, area.width.saturating_sub(2), 1);
-    let throbber = Throbber::default()
-        .label(label)
-        .style(theme.assistant_message)
-        .throbber_style(theme.highlight)
-        .throbber_set(BRAILLE_SIX)
-        .use_type(WhichUse::Spin);
-    frame.render_stateful_widget(throbber, throbber_area, app.throbber_state_mut());
 }
 
 fn render_scrollbar(

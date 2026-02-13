@@ -339,6 +339,7 @@ impl App {
             self.scroll_offset = self.scroll_offset.min(max_scroll);
         }
         self.draw_side_panel(frame, &layout);
+        widgets::chat::render_activity(self, frame, layout.activity);
         widgets::input::render(self, frame, layout.input);
         widgets::status::render(self, &self.metrics, frame, layout.status);
 
