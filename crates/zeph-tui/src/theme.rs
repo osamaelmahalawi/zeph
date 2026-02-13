@@ -38,7 +38,10 @@ impl Default for Theme {
             highlight: Style::default().fg(Color::Rgb(215, 150, 60)),
             error: Style::default().fg(Color::Red),
             thinking_message: Style::default().fg(Color::DarkGray),
-            code_inline: Style::default().fg(Color::Yellow),
+            code_inline: Style::default()
+                .fg(Color::Rgb(100, 180, 255))
+                .bg(Color::Rgb(15, 30, 55))
+                .add_modifier(Modifier::BOLD),
             code_block: Style::default().fg(Color::Rgb(190, 175, 145)),
             streaming_cursor: Style::default()
                 .fg(Color::Yellow)
