@@ -17,7 +17,8 @@ pub fn render(app: &mut App, frame: &mut Frame, area: Rect) -> usize {
 
     let theme = Theme::default();
     let inner_height = area.height.saturating_sub(2) as usize;
-    let wrap_width = area.width.saturating_sub(2) as usize;
+    // 2 for block borders + 2 for accent prefix ("▎ ") added per line
+    let wrap_width = area.width.saturating_sub(4) as usize;
 
     let mut lines: Vec<Line<'_>> = Vec::new();
 
