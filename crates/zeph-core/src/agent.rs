@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tokio::sync::{mpsc, watch};
 use tokio_stream::StreamExt;
-use zeph_llm::provider::{LlmProvider, Message, Role};
+use zeph_llm::provider::{LlmProvider, Message, MessagePart, Role};
 
 use crate::metrics::MetricsSnapshot;
 use zeph_memory::semantic::SemanticMemory;
@@ -113,6 +113,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             messages: vec![Message {
                 role: Role::System,
                 content: system_prompt,
+                parts: vec![],
             }],
             registry,
             skill_paths: Vec::new(),
@@ -409,6 +410,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             .chat(&[Message {
                 role: Role::User,
                 content: compaction_prompt,
+                parts: vec![],
             }])
             .await?;
 
@@ -421,6 +423,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                 content: format!(
                     "[conversation summary — {compacted_count} messages compacted]\n{summary}"
                 ),
+                parts: vec![],
             },
         );
 
@@ -438,8 +441,18 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
     }
 
     fn remove_recall_messages(&mut self) {
-        self.messages
-            .retain(|m| !(m.role == Role::System && m.content.starts_with(RECALL_PREFIX)));
+        self.messages.retain(|m| {
+            if m.role != Role::System {
+                return true;
+            }
+            if m.parts
+                .first()
+                .is_some_and(|p| matches!(p, MessagePart::Recall { .. }))
+            {
+                return false;
+            }
+            !m.content.starts_with(RECALL_PREFIX)
+        });
     }
 
     async fn inject_semantic_recall(
@@ -482,10 +495,10 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
         if tokens_used > estimate_tokens(RECALL_PREFIX) && self.messages.len() > 1 {
             self.messages.insert(
                 1,
-                Message {
-                    role: Role::System,
-                    content: recall_text,
-                },
+                Message::from_parts(
+                    Role::System,
+                    vec![MessagePart::Recall { text: recall_text }],
+                ),
             );
         }
 
@@ -502,10 +515,10 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
         let content = format!("{CODE_CONTEXT_PREFIX}{text}");
         self.messages.insert(
             1,
-            Message {
-                role: Role::System,
-                content,
-            },
+            Message::from_parts(
+                Role::System,
+                vec![MessagePart::CodeContext { text: content }],
+            ),
         );
     }
 
@@ -535,13 +548,33 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
     }
 
     fn remove_code_context_messages(&mut self) {
-        self.messages
-            .retain(|m| !(m.role == Role::System && m.content.starts_with(CODE_CONTEXT_PREFIX)));
+        self.messages.retain(|m| {
+            if m.role != Role::System {
+                return true;
+            }
+            if m.parts
+                .first()
+                .is_some_and(|p| matches!(p, MessagePart::CodeContext { .. }))
+            {
+                return false;
+            }
+            !m.content.starts_with(CODE_CONTEXT_PREFIX)
+        });
     }
 
     fn remove_summary_messages(&mut self) {
-        self.messages
-            .retain(|m| !(m.role == Role::System && m.content.starts_with(SUMMARY_PREFIX)));
+        self.messages.retain(|m| {
+            if m.role != Role::System {
+                return true;
+            }
+            if m.parts
+                .first()
+                .is_some_and(|p| matches!(p, MessagePart::Summary { .. }))
+            {
+                return false;
+            }
+            !m.content.starts_with(SUMMARY_PREFIX)
+        });
     }
 
     async fn inject_summaries(&mut self, token_budget: usize) -> anyhow::Result<()> {
@@ -578,10 +611,10 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
         if tokens_used > estimate_tokens(SUMMARY_PREFIX) && self.messages.len() > 1 {
             self.messages.insert(
                 1,
-                Message {
-                    role: Role::System,
-                    content: summary_text,
-                },
+                Message::from_parts(
+                    Role::System,
+                    vec![MessagePart::Summary { text: summary_text }],
+                ),
             );
             tracing::debug!(tokens_used, "injected summaries into context");
         }
@@ -779,6 +812,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             self.messages.push(Message {
                 role: Role::User,
                 content: incoming.text.clone(),
+                parts: vec![],
             });
             self.persist_message(Role::User, &incoming.text).await;
 
@@ -1556,6 +1590,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             self.messages.push(Message {
                 role: Role::Assistant,
                 content: response.clone(),
+                parts: vec![],
             });
             self.persist_message(Role::Assistant, &response).await;
 
@@ -1647,6 +1682,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
         let messages = vec![Message {
             role: Role::User,
             content: prompt,
+            parts: vec![],
         }];
 
         match self.provider.chat(&messages).await {
@@ -1708,6 +1744,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                 self.messages.push(Message {
                     role: Role::User,
                     content: formatted_output.clone(),
+                    parts: vec![],
                 });
                 self.persist_message(Role::User, &formatted_output).await;
                 Ok(true)
@@ -1734,6 +1771,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                         self.messages.push(Message {
                             role: Role::User,
                             content: formatted.clone(),
+                            parts: vec![],
                         });
                         self.persist_message(Role::User, &formatted).await;
                     }
@@ -1930,6 +1968,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
         self.messages.push(Message {
             role: Role::User,
             content: prompt,
+            parts: vec![],
         });
 
         let messages_before = self.messages.len();
@@ -2085,10 +2124,12 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                 content:
                     "You are a skill improvement assistant. Output only the improved skill body."
                         .into(),
+                parts: vec![],
             },
             Message {
                 role: Role::User,
                 content: prompt,
+                parts: vec![],
             },
         ];
 
@@ -3163,6 +3204,7 @@ mod agent_tests {
             agent.messages.push(Message {
                 role: Role::User,
                 content: format!("message {i} with some content to add tokens"),
+                parts: vec![],
             });
         }
         assert!(!agent.should_compact());
@@ -3194,6 +3236,7 @@ mod agent_tests {
             agent.messages.push(Message {
                 role: Role::User,
                 content: format!("message number {i} with enough content to push over budget"),
+                parts: vec![],
             });
         }
         assert!(agent.should_compact());
@@ -3219,6 +3262,7 @@ mod agent_tests {
                     Role::Assistant
                 },
                 content: format!("message {i}"),
+                parts: vec![],
             });
         }
 
@@ -3249,10 +3293,12 @@ mod agent_tests {
         agent.messages.push(Message {
             role: Role::User,
             content: "msg1".to_string(),
+            parts: vec![],
         });
         agent.messages.push(Message {
             role: Role::Assistant,
             content: "msg2".to_string(),
+            parts: vec![],
         });
 
         let len_before = agent.messages.len();
@@ -3304,6 +3350,7 @@ mod agent_tests {
             agent.messages.push(Message {
                 role: Role::User,
                 content: format!("message {i}"),
+                parts: vec![],
             });
         }
 
@@ -3339,6 +3386,7 @@ mod agent_tests {
             Message {
                 role: Role::System,
                 content: format!("{RECALL_PREFIX}old recall data"),
+                parts: vec![],
             },
         );
         assert_eq!(agent.messages.len(), 2);
@@ -3375,6 +3423,7 @@ mod agent_tests {
             agent.messages.push(Message {
                 role: Role::User,
                 content: format!("message {i}"),
+                parts: vec![],
             });
         }
         assert_eq!(agent.messages.len(), 11);
@@ -3398,6 +3447,7 @@ mod agent_tests {
             agent.messages.push(Message {
                 role: Role::User,
                 content: format!("msg {i}"),
+                parts: vec![],
             });
         }
 
@@ -3420,6 +3470,7 @@ mod agent_tests {
             agent.messages.push(Message {
                 role: Role::User,
                 content: format!("message {i}"),
+                parts: vec![],
             });
         }
         let msg_count = agent.messages.len();
@@ -3439,14 +3490,17 @@ mod agent_tests {
         agent.messages.push(Message {
             role: Role::User,
             content: "hello".to_string(),
+            parts: vec![],
         });
         agent.messages.push(Message {
             role: Role::Assistant,
             content: "cmd".to_string(),
+            parts: vec![],
         });
         agent.messages.push(Message {
             role: Role::User,
             content: "[tool output: bash]\nsome output".to_string(),
+            parts: vec![],
         });
 
         assert_eq!(agent.last_user_query(), "hello");
@@ -3639,6 +3693,7 @@ mod agent_tests {
         agent.messages.push(Message {
             role: Role::User,
             content: "hello".into(),
+            parts: vec![],
         });
 
         agent.inject_summaries(1000).await.unwrap();
@@ -3672,11 +3727,13 @@ mod agent_tests {
             Message {
                 role: Role::System,
                 content: format!("{SUMMARY_PREFIX}old summary data"),
+                parts: vec![],
             },
         );
         agent.messages.push(Message {
             role: Role::User,
             content: "hello".into(),
+            parts: vec![],
         });
         assert_eq!(agent.messages.len(), 3);
 
@@ -3715,6 +3772,7 @@ mod agent_tests {
         agent.messages.push(Message {
             role: Role::User,
             content: "hello".into(),
+            parts: vec![],
         });
 
         // Use a very small budget: only the prefix + maybe one short entry
@@ -3746,6 +3804,7 @@ mod agent_tests {
             Message {
                 role: Role::System,
                 content: format!("{SUMMARY_PREFIX}old summary"),
+                parts: vec![],
             },
         );
         agent.messages.insert(
@@ -3753,6 +3812,7 @@ mod agent_tests {
             Message {
                 role: Role::System,
                 content: format!("{RECALL_PREFIX}recall data"),
+                parts: vec![],
             },
         );
         assert_eq!(agent.messages.len(), 3);
