@@ -2329,6 +2329,7 @@ mod self_learning {
     use zeph_llm::provider::{LlmProvider, Message};
     use zeph_memory::semantic::SemanticMemory;
     use zeph_memory::sqlite::SqliteStore;
+    use zeph_memory::types::ConversationId;
     use zeph_skills::registry::SkillRegistry;
     use zeph_tools::executor::{ToolError, ToolExecutor, ToolOutput};
 
@@ -2467,7 +2468,9 @@ mod self_learning {
         }
     }
 
-    async fn make_memory(provider: &MockProvider) -> (SemanticMemory<MockProvider>, i64) {
+    async fn make_memory(
+        provider: &MockProvider,
+    ) -> (SemanticMemory<MockProvider>, ConversationId) {
         let memory =
             SemanticMemory::new(":memory:", "http://invalid:6334", provider.clone(), "test")
                 .await
@@ -2479,7 +2482,7 @@ mod self_learning {
     async fn make_memory_file<P: LlmProvider + Clone>(
         provider: &P,
         db_path: &str,
-    ) -> (SemanticMemory<P>, i64) {
+    ) -> (SemanticMemory<P>, ConversationId) {
         let memory = SemanticMemory::new(db_path, "http://invalid:6334", provider.clone(), "test")
             .await
             .unwrap();
