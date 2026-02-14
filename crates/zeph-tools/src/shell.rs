@@ -3,6 +3,8 @@ use std::time::{Duration, Instant};
 
 use tokio::process::Command;
 
+use schemars::JsonSchema;
+
 use crate::audit::{AuditEntry, AuditLogger, AuditResult};
 use crate::config::ShellConfig;
 use crate::executor::{ToolError, ToolEvent, ToolEventTx, ToolExecutor, ToolOutput};
@@ -14,6 +16,14 @@ const DEFAULT_BLOCKED: &[&str] = &[
 ];
 
 const NETWORK_COMMANDS: &[&str] = &["curl", "wget", "nc ", "ncat", "netcat"];
+
+// Schema-only: fields are read by schemars derive, not by Rust code directly.
+#[derive(JsonSchema)]
+#[allow(dead_code)]
+pub(crate) struct BashParams {
+    /// The bash command to execute
+    command: String,
+}
 
 /// Bash block extraction and execution via `tokio::process::Command`.
 #[derive(Debug)]
@@ -256,6 +266,16 @@ impl ShellExecutor {
 impl ToolExecutor for ShellExecutor {
     async fn execute(&self, response: &str) -> Result<Option<ToolOutput>, ToolError> {
         self.execute_inner(response, false).await
+    }
+
+    fn tool_definitions(&self) -> Vec<crate::registry::ToolDef> {
+        use crate::registry::{InvocationHint, ToolDef};
+        vec![ToolDef {
+            id: "bash",
+            description: "Execute a shell command",
+            schema: schemars::schema_for!(BashParams),
+            invocation: InvocationHint::FencedBlock("bash"),
+        }]
     }
 }
 
@@ -1039,5 +1059,28 @@ mod tests {
         let response = "```bash\ndangerous command\n```";
         let result = executor.execute(response).await;
         assert!(matches!(result, Err(ToolError::Blocked { .. })));
+    }
+
+    #[test]
+    fn tool_definitions_returns_bash() {
+        let executor = ShellExecutor::new(&default_config());
+        let defs = executor.tool_definitions();
+        assert_eq!(defs.len(), 1);
+        assert_eq!(defs[0].id, "bash");
+        assert_eq!(
+            defs[0].invocation,
+            crate::registry::InvocationHint::FencedBlock("bash")
+        );
+    }
+
+    #[test]
+    fn tool_definitions_schema_has_command_param() {
+        let executor = ShellExecutor::new(&default_config());
+        let defs = executor.tool_definitions();
+        let obj = defs[0].schema.as_object().unwrap();
+        let props = obj["properties"].as_object().unwrap();
+        assert!(props.contains_key("command"));
+        let req = obj["required"].as_array().unwrap();
+        assert!(req.iter().any(|v| v.as_str() == Some("command")));
     }
 }
