@@ -649,7 +649,10 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             .last_skills_prompt
             .clone_from(&skills_prompt);
         let env = EnvironmentContext::gather(&self.model_name);
-        let tool_catalog = {
+        let tool_catalog = if self.provider.supports_tool_use() {
+            // Native tool_use: tools are passed via API, skip prompt-based instructions
+            None
+        } else {
             let defs = self.tool_executor.tool_definitions();
             if defs.is_empty() {
                 None
@@ -659,8 +662,12 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             }
         };
         #[allow(unused_mut)]
-        let mut system_prompt =
-            build_system_prompt(&skills_prompt, Some(&env), tool_catalog.as_deref());
+        let mut system_prompt = build_system_prompt(
+            &skills_prompt,
+            Some(&env),
+            tool_catalog.as_deref(),
+            self.provider.supports_tool_use(),
+        );
 
         if !catalog_prompt.is_empty() {
             system_prompt.push_str("\n\n");
