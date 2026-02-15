@@ -33,6 +33,7 @@ use crate::config_watcher::ConfigEvent;
 use crate::context::{ContextBudget, EnvironmentContext, build_system_prompt};
 
 const DOOM_LOOP_WINDOW: usize = 3;
+const TOOL_LOOP_KEEP_RECENT: usize = 4;
 const MAX_QUEUE_SIZE: usize = 10;
 const MESSAGE_MERGE_WINDOW: Duration = Duration::from_millis(500);
 const RECALL_PREFIX: &str = "[semantic recall]\n";
@@ -120,6 +121,7 @@ pub struct Agent<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> 
     start_time: Instant,
     message_queue: VecDeque<QueuedMessage>,
     summarize_tool_output_enabled: bool,
+    summary_provider: Option<P>,
     permission_policy: zeph_tools::PermissionPolicy,
     warmup_ready: Option<watch::Receiver<bool>>,
     max_tool_iterations: usize,
@@ -209,6 +211,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             start_time: Instant::now(),
             message_queue: VecDeque::new(),
             summarize_tool_output_enabled: false,
+            summary_provider: None,
             permission_policy: zeph_tools::PermissionPolicy::default(),
             warmup_ready: None,
             max_tool_iterations: 10,
@@ -314,6 +317,16 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
     }
 
     #[must_use]
+    pub fn with_summary_provider(mut self, provider: P) -> Self {
+        self.summary_provider = Some(provider);
+        self
+    }
+
+    fn summary_or_primary_provider(&self) -> &P {
+        self.summary_provider.as_ref().unwrap_or(&self.provider)
+    }
+
+    #[must_use]
     pub fn with_permission_policy(mut self, policy: zeph_tools::PermissionPolicy) -> Self {
         self.permission_policy = policy;
         self
@@ -413,6 +426,15 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             tx.send_modify(|m| {
                 m.uptime_seconds = elapsed;
                 f(m);
+            });
+        }
+    }
+
+    pub(crate) fn record_cache_usage(&self) {
+        if let Some((creation, read)) = self.provider.last_cache_usage() {
+            self.update_metrics(|m| {
+                m.cache_creation_tokens += creation;
+                m.cache_read_tokens += read;
             });
         }
     }

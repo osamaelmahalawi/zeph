@@ -6,7 +6,7 @@ use crate::channel::Channel;
 use crate::redact::redact_secrets;
 use zeph_memory::semantic::estimate_tokens;
 
-use super::{Agent, DOOM_LOOP_WINDOW, format_tool_output};
+use super::{Agent, DOOM_LOOP_WINDOW, TOOL_LOOP_KEEP_RECENT, format_tool_output};
 
 impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, T> {
     pub(crate) async fn process_response(&mut self) -> Result<(), super::error::AgentError> {
@@ -84,6 +84,9 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                 return Ok(());
             }
 
+            // Prune tool output bodies from older iterations to reduce context growth
+            self.prune_stale_tool_outputs(TOOL_LOOP_KEEP_RECENT);
+
             // Doom-loop detection: compare last N outputs by string equality
             if let Some(last_msg) = self.messages.last() {
                 self.doom_loop_history.push(last_msg.content.clone());
@@ -130,6 +133,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                     m.prompt_tokens += prompt_estimate;
                     m.total_tokens = m.prompt_tokens + m.completion_tokens;
                 });
+                self.record_cache_usage();
                 Ok(Some(r?))
             } else {
                 self.channel
@@ -150,6 +154,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
                         m.completion_tokens += completion_estimate;
                         m.total_tokens = m.prompt_tokens + m.completion_tokens;
                     });
+                    self.record_cache_usage();
                     let display = self.maybe_redact(&resp);
                     self.channel.send(&display).await?;
                     Ok(Some(resp))
@@ -191,7 +196,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             parts: vec![],
         }];
 
-        match self.provider.chat(&messages).await {
+        match self.summary_or_primary_provider().chat(&messages).await {
             Ok(summary) => format!("[tool output summary]\n```\n{summary}\n```"),
             Err(e) => {
                 tracing::warn!(
@@ -428,6 +433,9 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             self.handle_native_tool_calls(text.as_deref(), &tool_calls)
                 .await?;
 
+            // Prune tool output bodies from older iterations to reduce context growth
+            self.prune_stale_tool_outputs(TOOL_LOOP_KEEP_RECENT);
+
             if self.check_doom_loop(iteration).await? {
                 break;
             }
@@ -467,6 +475,7 @@ impl<P: LlmProvider + Clone + 'static, C: Channel, T: ToolExecutor> Agent<P, C, 
             m.api_calls += 1;
             m.last_llm_latency_ms = latency;
         });
+        self.record_cache_usage();
 
         Ok(Some(result))
     }
