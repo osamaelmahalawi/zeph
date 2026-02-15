@@ -142,7 +142,8 @@ impl SkillMatcherBackend {
     }
 }
 
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+#[must_use]
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
