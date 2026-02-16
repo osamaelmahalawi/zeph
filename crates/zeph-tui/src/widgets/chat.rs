@@ -351,10 +351,7 @@ impl<'t> MdRenderer<'t> {
     fn push_event(&mut self, event: Event<'_>) {
         match event {
             Event::Start(Tag::Heading { .. }) => {
-                self.push_style(
-                    self.base_style
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                );
+                self.push_style(self.theme.highlight.add_modifier(Modifier::BOLD));
             }
             Event::End(TagEnd::Heading { .. }) => {
                 self.pop_style();
@@ -582,7 +579,7 @@ mod tests {
         assert_eq!(heading_span.content, "Title");
         assert_eq!(
             heading_span.style,
-            base.add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+            theme.highlight.add_modifier(Modifier::BOLD)
         );
     }
 
