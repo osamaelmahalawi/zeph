@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- Hybrid memory search: FTS5 keyword search combined with Qdrant vector similarity (#372, #373, #374)
+- SQLite FTS5 virtual table with auto-sync triggers for full-text keyword search
+- Configurable `vector_weight`/`keyword_weight` in `[memory.semantic]` for hybrid ranking
+- FTS5-only fallback when Qdrant is unavailable (replaces empty results)
 - `AutonomyLevel` enum (ReadOnly/Supervised/Full) for controlling tool access (#370)
 - `autonomy_level` config key in `[security]` section (default: supervised)
 - Read-only mode restricts agent to file_read, file_glob, file_grep, web_scrape
