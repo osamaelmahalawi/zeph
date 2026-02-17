@@ -6,6 +6,7 @@ pub mod composite;
 pub mod config;
 pub mod executor;
 pub mod file;
+pub mod filter;
 pub mod overflow;
 pub mod permissions;
 pub mod registry;
@@ -22,6 +23,7 @@ pub use executor::{
     truncate_tool_output,
 };
 pub use file::FileExecutor;
+pub use filter::{FilterConfig, FilterResult, OutputFilter, OutputFilterRegistry, sanitize_output};
 pub use overflow::{cleanup_overflow_files, save_overflow};
 pub use permissions::{
     AutonomyLevel, PermissionAction, PermissionPolicy, PermissionRule, PermissionsConfig,
