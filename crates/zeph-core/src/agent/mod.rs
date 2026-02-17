@@ -539,6 +539,24 @@ impl<C: Channel, T: ToolExecutor> Agent<C, T> {
             manager.shutdown_all_shared().await;
         }
 
+        if let Some(ref tx) = self.metrics_tx {
+            let m = tx.borrow();
+            if m.filter_applications > 0 {
+                #[allow(clippy::cast_precision_loss)]
+                let pct = if m.filter_raw_tokens > 0 {
+                    m.filter_saved_tokens as f64 / m.filter_raw_tokens as f64 * 100.0
+                } else {
+                    0.0
+                };
+                tracing::info!(
+                    raw_tokens = m.filter_raw_tokens,
+                    saved_tokens = m.filter_saved_tokens,
+                    applications = m.filter_applications,
+                    "tool output filtering saved ~{} tokens ({pct:.0}%)",
+                    m.filter_saved_tokens,
+                );
+            }
+        }
         tracing::info!("agent shutdown complete");
     }
 
@@ -1139,6 +1157,7 @@ pub(super) mod agent_tests {
             tool_name: "bash".to_string(),
             summary: "tool executed successfully".to_string(),
             blocks_executed: 1,
+            filter_stats: None,
         }))]);
 
         let agent_channel = MockChannel::new(vec!["execute tool".to_string()]);
@@ -1336,6 +1355,7 @@ pub(super) mod agent_tests {
                 tool_name: "bash".to_string(),
                 summary: "[error] command failed [exit code 1]".to_string(),
                 blocks_executed: 1,
+                filter_stats: None,
             })),
             Ok(None),
         ]);
@@ -1355,6 +1375,7 @@ pub(super) mod agent_tests {
             tool_name: "bash".to_string(),
             summary: "   ".to_string(),
             blocks_executed: 1,
+            filter_stats: None,
         }))]);
 
         let mut agent = Agent::new(provider, channel, registry, None, 5, executor);
@@ -1446,6 +1467,7 @@ pub(super) mod agent_tests {
                 tool_name: "bash".to_string(),
                 summary: "step 1 complete".to_string(),
                 blocks_executed: 1,
+                filter_stats: None,
             })),
             Ok(None),
         ]);
@@ -1473,6 +1495,7 @@ pub(super) mod agent_tests {
                 tool_name: "bash".to_string(),
                 summary: "continuing".to_string(),
                 blocks_executed: 1,
+                filter_stats: None,
             })));
         }
         let executor = MockToolExecutor::new(outputs);
