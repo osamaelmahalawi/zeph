@@ -1,5 +1,6 @@
 //! Command-aware output filtering pipeline.
 
+pub(crate) mod cargo_build;
 mod clippy;
 mod dir_listing;
 mod git;
@@ -12,6 +13,7 @@ use std::sync::{LazyLock, Mutex};
 use regex::Regex;
 use serde::Deserialize;
 
+pub use self::cargo_build::CargoBuildFilter;
 pub use self::clippy::ClippyFilter;
 pub use self::dir_listing::DirListingFilter;
 pub use self::git::GitFilter;
@@ -282,6 +284,9 @@ pub struct FilterConfig {
     pub clippy: ClippyFilterConfig,
 
     #[serde(default)]
+    pub cargo_build: CargoBuildFilterConfig,
+
+    #[serde(default)]
     pub dir_listing: DirListingFilterConfig,
 
     #[serde(default)]
@@ -298,6 +303,7 @@ impl Default for FilterConfig {
             test: TestFilterConfig::default(),
             git: GitFilterConfig::default(),
             clippy: ClippyFilterConfig::default(),
+            cargo_build: CargoBuildFilterConfig::default(),
             dir_listing: DirListingFilterConfig::default(),
             log_dedup: LogDedupFilterConfig::default(),
             security: SecurityFilterConfig::default(),
@@ -352,6 +358,18 @@ pub struct ClippyFilterConfig {
 }
 
 impl Default for ClippyFilterConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CargoBuildFilterConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for CargoBuildFilterConfig {
     fn default() -> Self {
         Self { enabled: true }
     }
@@ -453,6 +471,9 @@ impl OutputFilterRegistry {
         if config.clippy.enabled {
             r.register(Box::new(ClippyFilter::new(config.clippy.clone())));
         }
+        if config.cargo_build.enabled {
+            r.register(Box::new(CargoBuildFilter::new(config.cargo_build.clone())));
+        }
         if config.git.enabled {
             r.register(Box::new(GitFilter::new(config.git.clone())));
         }
@@ -498,7 +519,6 @@ impl OutputFilterRegistry {
                 raw_output,
                 &self.extra_security_patterns,
             );
-            result.filtered_chars = result.output.len();
         }
 
         self.record_metrics(&result);
@@ -532,7 +552,14 @@ impl OutputFilterRegistry {
 // Helpers
 // ---------------------------------------------------------------------------
 
-static ANSI_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]").unwrap());
+static ANSI_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b[()][A-B0-2]").unwrap());
+
+/// Strip only ANSI escape sequences, preserving newlines and whitespace.
+#[must_use]
+pub fn strip_ansi(raw: &str) -> String {
+    ANSI_RE.replace_all(raw, "").into_owned()
+}
 
 /// Strip ANSI escape sequences, carriage-return progress bars, and collapse blank lines.
 #[must_use]

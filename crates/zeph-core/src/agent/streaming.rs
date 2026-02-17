@@ -309,16 +309,16 @@ impl<C: Channel, T: ToolExecutor> Agent<C, T> {
                 }
 
                 let processed = self.maybe_summarize_tool_output(&output.summary).await;
-                let formatted_output = format_tool_output(&output.tool_name, &processed);
+                let body = if let Some(ref fs) = output.filter_stats
+                    && fs.filtered_chars < fs.raw_chars
+                {
+                    format!("{}\n{processed}", fs.format_inline(&output.tool_name))
+                } else {
+                    processed.clone()
+                };
+                let formatted_output = format_tool_output(&output.tool_name, &body);
                 let display = self.maybe_redact(&formatted_output);
                 self.channel.send(&display).await?;
-
-                if let Some(ref fs) = output.filter_stats
-                    && fs.filtered_lines < fs.raw_lines
-                {
-                    let stats_line = fs.format_inline(&output.tool_name);
-                    self.channel.send(&stats_line).await?;
-                }
 
                 self.push_message(Message::from_parts(
                     Role::User,
@@ -586,6 +586,7 @@ impl<C: Channel, T: ToolExecutor> Agent<C, T> {
         Ok(Some(result))
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn handle_native_tool_calls(
         &mut self,
         text: Option<&str>,
@@ -635,7 +636,7 @@ impl<C: Channel, T: ToolExecutor> Agent<C, T> {
                 .execute_tool_call(&call)
                 .instrument(tracing::info_span!("tool_exec", tool_name = %tc.name))
                 .await;
-            let (output, is_error) = match tool_result {
+            let (output, is_error, inline_stats) = match tool_result {
                 Ok(Some(out)) => {
                     if let Some(ref fs) = out.filter_stats {
                         let saved = fs.estimated_tokens_saved() as u64;
@@ -668,20 +669,22 @@ impl<C: Channel, T: ToolExecutor> Agent<C, T> {
                     if let Some(diff) = out.diff {
                         let _ = self.channel.send_diff(diff).await;
                     }
-                    if let Some(ref fs) = out.filter_stats
-                        && fs.filtered_lines < fs.raw_lines
-                    {
-                        let stats_line = fs.format_inline(&tc.name);
-                        self.channel.send(&stats_line).await?;
-                    }
-                    (out.summary, false)
+                    let inline_stats = out.filter_stats.as_ref().and_then(|fs| {
+                        (fs.filtered_chars < fs.raw_chars).then(|| fs.format_inline(&tc.name))
+                    });
+                    (out.summary, false, inline_stats)
                 }
-                Ok(None) => ("(no output)".to_owned(), false),
-                Err(e) => (format!("[error] {e}"), true),
+                Ok(None) => ("(no output)".to_owned(), false, None),
+                Err(e) => (format!("[error] {e}"), true, None),
             };
 
             let processed = self.maybe_summarize_tool_output(&output).await;
-            let formatted = format_tool_output(&tc.name, &processed);
+            let body = if let Some(stats) = inline_stats {
+                format!("{stats}\n{processed}")
+            } else {
+                processed.clone()
+            };
+            let formatted = format_tool_output(&tc.name, &body);
             let display = self.maybe_redact(&formatted);
             self.channel.send(&display).await?;
 
