@@ -73,6 +73,8 @@ pub struct ToolOutput {
     pub blocks_executed: u32,
     pub filter_stats: Option<FilterStats>,
     pub diff: Option<DiffData>,
+    /// Whether this tool already streamed its output via `ToolEvent` channel.
+    pub streamed: bool,
 }
 
 impl fmt::Display for ToolOutput {
@@ -213,6 +215,7 @@ mod tests {
             blocks_executed: 1,
             filter_stats: None,
             diff: None,
+            streamed: false,
         };
         assert_eq!(output.to_string(), "$ echo hello\nhello");
     }
