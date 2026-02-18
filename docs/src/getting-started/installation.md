@@ -7,19 +7,19 @@ Install Zeph from source, the install script, pre-built binaries, or Docker.
 Run the one-liner to download and install the latest release:
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/bug-ops/zeph/main/install/install.sh | sh
+curl -fsSL https://github.com/bug-ops/zeph/releases/latest/download/install.sh | sh
 ```
 
 The script detects your OS and architecture, downloads the binary to `~/.zeph/bin/zeph`, and adds it to your `PATH`. Override the install directory with `ZEPH_INSTALL_DIR`:
 
 ```bash
-ZEPH_INSTALL_DIR=/usr/local/bin curl -sSf https://raw.githubusercontent.com/bug-ops/zeph/main/install/install.sh | sh
+ZEPH_INSTALL_DIR=/usr/local/bin curl -fsSL https://github.com/bug-ops/zeph/releases/latest/download/install.sh | sh
 ```
 
 Install a specific version:
 
 ```bash
-curl -sSf https://raw.githubusercontent.com/bug-ops/zeph/main/install/install.sh | sh -s -- --version v0.10.0
+curl -fsSL https://github.com/bug-ops/zeph/releases/latest/download/install.sh | sh -s -- --version v0.10.0
 ```
 
 After installation, run the configuration wizard:

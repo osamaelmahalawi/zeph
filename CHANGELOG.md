@@ -31,6 +31,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Telegram voice and audio message handling with automatic file download (#524)
 - STT bootstrap wiring: `WhisperProvider` created from `[llm.stt]` config behind `stt` feature (#529)
 - Slack audio file upload handling with host validation and size limits (#525)
+- Shell-based installation script (`install/install.sh`) with SHA256 verification, platform detection, and `--version` flag
+- Shellcheck lint job in CI pipeline
+- Per-job permission scoping in release workflow (least privilege)
 
 ## [0.10.0] - 2026-02-18
 

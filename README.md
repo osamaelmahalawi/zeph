@@ -26,6 +26,9 @@ Zeph takes the opposite approach: **automated context engineering**. Only releva
 ## Installation
 
 ```bash
+# One-liner (Linux and macOS)
+curl -fsSL https://github.com/bug-ops/zeph/releases/latest/download/install.sh | sh
+
 # From source
 cargo install --git https://github.com/bug-ops/zeph
 ```
