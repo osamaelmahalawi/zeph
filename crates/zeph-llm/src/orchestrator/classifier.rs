@@ -1,5 +1,11 @@
 use crate::provider::{Message, Role};
 
+#[derive(Debug, Clone, serde::Deserialize, schemars::JsonSchema)]
+pub struct ModelSelection {
+    pub model: String,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TaskType {
     Coding,
@@ -387,10 +393,73 @@ mod tests {
     }
 
     #[test]
+    fn model_selection_deserialize() {
+        let json = r#"{"model": "claude", "reason": "complex task"}"#;
+        let sel: ModelSelection = serde_json::from_str(json).unwrap();
+        assert_eq!(sel.model, "claude");
+        assert_eq!(sel.reason, "complex task");
+    }
+
+    #[test]
     fn classify_code_with_backticks() {
         assert_eq!(
             TaskType::classify(&user_msg("here is some code ```rust let x = 5;```")),
             TaskType::Coding
         );
+    }
+
+    // Priority 2: edge cases
+
+    #[test]
+    fn classify_code_wins_over_analysis_when_both_match() {
+        // "analyze this code function" — contains "analyze" (Analysis) and "code", "function" (Coding)
+        // code indicators are checked first, so Coding wins
+        let result = TaskType::classify(&user_msg("analyze this code function"));
+        assert_eq!(result, TaskType::Coding);
+    }
+
+    #[test]
+    fn classify_only_assistant_messages_returns_general() {
+        let messages = vec![Message {
+            role: Role::Assistant,
+            content: "I will write a function for you".into(),
+            parts: vec![],
+        }];
+        // No user message → last_user_msg is empty → General
+        assert_eq!(TaskType::classify(&messages), TaskType::General);
+    }
+
+    #[test]
+    fn model_selection_missing_reason_fails() {
+        let json = r#"{"model": "claude"}"#;
+        let result: Result<ModelSelection, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "expected error when reason field is missing"
+        );
+    }
+
+    #[test]
+    fn model_selection_extra_unknown_fields_succeeds() {
+        let json = r#"{"model": "ollama", "reason": "fast", "unknown": 99}"#;
+        let sel: ModelSelection = serde_json::from_str(json).unwrap();
+        assert_eq!(sel.model, "ollama");
+        assert_eq!(sel.reason, "fast");
+    }
+
+    // Priority 3: proptest
+
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn classify_never_panics(input in ".*") {
+            let msgs = vec![Message {
+                role: Role::User,
+                content: input,
+                parts: vec![],
+            }];
+            let _ = TaskType::classify(&msgs);
+        }
     }
 }
