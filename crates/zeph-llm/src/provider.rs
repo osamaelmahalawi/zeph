@@ -239,6 +239,70 @@ pub trait LlmProvider: Send + Sync {
     fn last_cache_usage(&self) -> Option<(u64, u64)> {
         None
     }
+
+    /// Whether this provider supports native structured output.
+    fn supports_structured_output(&self) -> bool {
+        false
+    }
+
+    /// Send messages and parse the response into a typed value `T`.
+    ///
+    /// Default implementation injects JSON schema into the system prompt and retries once
+    /// on parse failure. Providers with native structured output should override this.
+    #[allow(async_fn_in_trait)]
+    async fn chat_typed<T>(&self, messages: &[Message]) -> Result<T, LlmError>
+    where
+        T: serde::de::DeserializeOwned + schemars::JsonSchema,
+        Self: Sized,
+    {
+        let schema = schemars::schema_for!(T);
+        let schema_json = serde_json::to_string_pretty(&schema)
+            .map_err(|e| LlmError::StructuredParse(e.to_string()))?;
+        let type_name = std::any::type_name::<T>()
+            .rsplit("::")
+            .next()
+            .unwrap_or("Output");
+
+        let mut augmented = messages.to_vec();
+        let instruction = format!(
+            "Respond with a valid JSON object matching this schema. \
+             Output ONLY the JSON, no markdown fences or extra text.\n\n\
+             Type: {type_name}\nSchema:\n```json\n{schema_json}\n```"
+        );
+        augmented.insert(0, Message::from_legacy(Role::System, instruction));
+
+        let raw = self.chat(&augmented).await?;
+        let cleaned = strip_json_fences(&raw);
+        match serde_json::from_str::<T>(cleaned) {
+            Ok(val) => Ok(val),
+            Err(first_err) => {
+                augmented.push(Message::from_legacy(Role::Assistant, &raw));
+                augmented.push(Message::from_legacy(
+                    Role::User,
+                    format!(
+                        "Your response was not valid JSON. Error: {first_err}. \
+                         Please output ONLY valid JSON matching the schema."
+                    ),
+                ));
+                let retry_raw = self.chat(&augmented).await?;
+                let retry_cleaned = strip_json_fences(&retry_raw);
+                serde_json::from_str::<T>(retry_cleaned).map_err(|e| {
+                    LlmError::StructuredParse(format!("parse failed after retry: {e}"))
+                })
+            }
+        }
+    }
+}
+
+/// Strip markdown code fences from LLM output. Only handles outer fences;
+/// JSON containing trailing triple backticks in string values may be
+/// incorrectly trimmed (acceptable for MVP — see review R2).
+fn strip_json_fences(s: &str) -> &str {
+    s.trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim()
 }
 
 #[cfg(test)]
@@ -719,5 +783,172 @@ mod tests {
         } else {
             panic!("expected ToolOutput");
         }
+    }
+
+    // --- M27: strip_json_fences tests ---
+
+    #[test]
+    fn strip_json_fences_plain_json() {
+        assert_eq!(strip_json_fences(r#"{"a": 1}"#), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn strip_json_fences_with_json_fence() {
+        assert_eq!(strip_json_fences("```json\n{\"a\": 1}\n```"), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn strip_json_fences_with_plain_fence() {
+        assert_eq!(strip_json_fences("```\n{\"a\": 1}\n```"), r#"{"a": 1}"#);
+    }
+
+    #[test]
+    fn strip_json_fences_whitespace() {
+        assert_eq!(strip_json_fences("  \n  "), "");
+    }
+
+    #[test]
+    fn strip_json_fences_empty() {
+        assert_eq!(strip_json_fences(""), "");
+    }
+
+    #[test]
+    fn strip_json_fences_outer_whitespace() {
+        assert_eq!(
+            strip_json_fences("  ```json\n{\"a\": 1}\n```  "),
+            r#"{"a": 1}"#
+        );
+    }
+
+    #[test]
+    fn strip_json_fences_only_opening_fence() {
+        assert_eq!(strip_json_fences("```json\n{\"a\": 1}"), r#"{"a": 1}"#);
+    }
+
+    // --- M27: chat_typed tests ---
+
+    #[derive(Debug, serde::Deserialize, schemars::JsonSchema, PartialEq)]
+    struct TestOutput {
+        value: String,
+    }
+
+    struct SequentialStub {
+        responses: std::sync::Mutex<Vec<Result<String, LlmError>>>,
+    }
+
+    impl SequentialStub {
+        fn new(responses: Vec<Result<String, LlmError>>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(responses),
+            }
+        }
+    }
+
+    impl LlmProvider for SequentialStub {
+        async fn chat(&self, _messages: &[Message]) -> Result<String, LlmError> {
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                return Err(LlmError::Other("no more responses".into()));
+            }
+            responses.remove(0)
+        }
+
+        async fn chat_stream(&self, messages: &[Message]) -> Result<ChatStream, LlmError> {
+            let response = self.chat(messages).await?;
+            Ok(Box::pin(tokio_stream::once(Ok(response))))
+        }
+
+        fn supports_streaming(&self) -> bool {
+            false
+        }
+
+        async fn embed(&self, _text: &str) -> Result<Vec<f32>, LlmError> {
+            Err(LlmError::EmbedUnsupported {
+                provider: "sequential-stub",
+            })
+        }
+
+        fn supports_embeddings(&self) -> bool {
+            false
+        }
+
+        fn name(&self) -> &'static str {
+            "sequential-stub"
+        }
+    }
+
+    #[tokio::test]
+    async fn chat_typed_happy_path() {
+        let provider = StubProvider {
+            response: r#"{"value": "hello"}"#.into(),
+        };
+        let messages = vec![Message::from_legacy(Role::User, "test")];
+        let result: TestOutput = provider.chat_typed(&messages).await.unwrap();
+        assert_eq!(
+            result,
+            TestOutput {
+                value: "hello".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn chat_typed_retry_succeeds() {
+        let provider = SequentialStub::new(vec![
+            Ok("not valid json".into()),
+            Ok(r#"{"value": "ok"}"#.into()),
+        ]);
+        let messages = vec![Message::from_legacy(Role::User, "test")];
+        let result: TestOutput = provider.chat_typed(&messages).await.unwrap();
+        assert_eq!(result, TestOutput { value: "ok".into() });
+    }
+
+    #[tokio::test]
+    async fn chat_typed_both_fail() {
+        let provider = SequentialStub::new(vec![Ok("bad json".into()), Ok("still bad".into())]);
+        let messages = vec![Message::from_legacy(Role::User, "test")];
+        let result = provider.chat_typed::<TestOutput>(&messages).await;
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("parse failed after retry"));
+    }
+
+    #[tokio::test]
+    async fn chat_typed_chat_error_propagates() {
+        let provider = SequentialStub::new(vec![Err(LlmError::Unavailable)]);
+        let messages = vec![Message::from_legacy(Role::User, "test")];
+        let result = provider.chat_typed::<TestOutput>(&messages).await;
+        assert!(matches!(result, Err(LlmError::Unavailable)));
+    }
+
+    #[tokio::test]
+    async fn chat_typed_strips_fences() {
+        let provider = StubProvider {
+            response: "```json\n{\"value\": \"fenced\"}\n```".into(),
+        };
+        let messages = vec![Message::from_legacy(Role::User, "test")];
+        let result: TestOutput = provider.chat_typed(&messages).await.unwrap();
+        assert_eq!(
+            result,
+            TestOutput {
+                value: "fenced".into()
+            }
+        );
+    }
+
+    #[test]
+    fn supports_structured_output_default_false() {
+        let provider = StubProvider {
+            response: String::new(),
+        };
+        assert!(!provider.supports_structured_output());
+    }
+
+    #[test]
+    fn structured_parse_error_display() {
+        let err = LlmError::StructuredParse("test error".into());
+        assert_eq!(
+            err.to_string(),
+            "structured output parse failed: test error"
+        );
     }
 }
