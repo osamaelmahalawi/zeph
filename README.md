@@ -1,10 +1,10 @@
 <div align="center">
   <img src="asset/zeph-logo.png" alt="Zeph" width="480">
 
-  **AI agent that ships as a single binary. No Python. No containers. No dependency hell.**
+  **The AI agent that respects your resources.**
 
-  Route tasks across Ollama, Claude, OpenAI, HuggingFace, and any OpenAI-compatible API —<br>
-  with semantic skills, vector memory, MCP tooling, and a built-in TUI dashboard.
+  Single binary. Minimal hardware. Maximum context efficiency.<br>
+  Every token counts — Zeph makes sure none are wasted.
 
   [![CI](https://img.shields.io/github/actions/workflow/status/bug-ops/zeph/ci.yml?branch=main&label=CI)](https://github.com/bug-ops/zeph/actions)
   [![codecov](https://codecov.io/gh/bug-ops/zeph/graph/badge.svg?token=S5O0GR9U6G)](https://codecov.io/gh/bug-ops/zeph)
@@ -12,89 +12,193 @@
   [![MSRV](https://img.shields.io/badge/MSRV-1.88-blue)](https://www.rust-lang.org)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-  [Quick Start](#quick-start) · [Features](#what-makes-zeph-different) · [Docs](https://bug-ops.github.io/zeph/) · [Architecture](#architecture)
+  [Quick Start](#quick-start) · [Efficiency](#automated-context-engineering) · [Security](#defense-in-depth-security) · [Docs](https://bug-ops.github.io/zeph/) · [Architecture](#architecture)
 </div>
 
 ---
 
+## The Problem
+
+Most AI agent frameworks are **token furnaces**. They dump every tool description, every skill, every raw command output into the context window — and bill you for it. They need beefy servers, Python runtimes, container orchestrators, and a generous API budget just to get started.
+
+Zeph takes the opposite approach: **automated context engineering**. Only relevant data enters the context. Everything else is filtered, compressed, or retrieved on demand. The result — dramatically lower costs, faster responses, and an agent that runs on hardware you already have.
+
 ## Quick Start
 
 ```bash
-# From source
 git clone https://github.com/bug-ops/zeph && cd zeph
 cargo build --release
 
-# With local Ollama
+# Local models — no API costs
 ollama pull mistral:7b && ollama pull qwen3-embedding
 ./target/release/zeph
 
-# With Claude
+# Cloud providers
 ZEPH_LLM_PROVIDER=claude ZEPH_CLAUDE_API_KEY=sk-ant-... ./target/release/zeph
-
-# With OpenAI
 ZEPH_LLM_PROVIDER=openai ZEPH_OPENAI_API_KEY=sk-... ./target/release/zeph
 
-# With any OpenAI-compatible API (Together AI, Groq, Fireworks, etc.)
+# Any OpenAI-compatible API (Together AI, Groq, Fireworks, etc.)
 ZEPH_LLM_PROVIDER=compatible ZEPH_COMPATIBLE_BASE_URL=https://api.together.xyz/v1 \
   ZEPH_COMPATIBLE_API_KEY=... ./target/release/zeph
 ```
 
 Pre-built binaries for Linux, macOS, and Windows: [GitHub Releases](https://github.com/bug-ops/zeph/releases/latest) · [Docker](https://bug-ops.github.io/zeph/guide/docker.html)
 
-## What Makes Zeph Different
+> [!TIP]
+> Full setup walkthrough: [Installation](https://bug-ops.github.io/zeph/getting-started/installation.html) · [Configuration](https://bug-ops.github.io/zeph/getting-started/configuration.html) · [Secrets management](https://bug-ops.github.io/zeph/guide/vault.html)
 
-### Compiled, Not Interpreted
+## Automated Context Engineering
 
-Written in Rust. Compiles to a single static binary. No runtime, no virtualenv, no `pip install` that breaks on every OS update. Deploy by copying one file.
+This is the core idea behind Zeph. Every byte that enters the LLM context window is there because it's **useful for the model** — not because the framework was too lazy to filter it.
 
-### Token-Efficient by Design
+### Semantic Skill Selection — O(K), Not O(N)
 
-Most agent frameworks inject every tool into every prompt — O(N) scaling. Zeph embeds skills and MCP tools as vectors, then selects only the **top-K relevant** per query via cosine similarity. Prompt size stays **O(K)** regardless of installed capabilities.
+Most frameworks inject all tool descriptions into every prompt. 50 tools installed? 50 descriptions in every request.
 
-Smart output filtering compresses tool output by **70-99%** before context injection — test results, git logs, clippy diagnostics, directory listings, log deduplication. Per-command stats shown inline:
+Zeph embeds skills and MCP tools as vectors at startup (concurrent embedding via `buffer_unordered`), then retrieves only the **top-K relevant** per query via cosine similarity. Install 500 skills — the prompt sees only the 5 that matter. [How skills work →](https://bug-ops.github.io/zeph/guide/skills.html)
+
+### Smart Output Filtering — 70-99% Token Savings
+
+Raw tool output is the #1 context window polluter. A `cargo test` run produces 300+ lines; the model needs 3. Zeph applies command-aware filters **before** context injection:
+
+| Filter | What It Does | Typical Savings |
+|--------|-------------|-----------------|
+| **Test** | Cargo test/nextest — failures-only mode | 94-99% |
+| **Git** | Compact status/diff/log/push | 80-99% |
+| **Clippy** | Group warnings by lint rule | 70-90% |
+| **Directory** | Hide noise dirs (target, node_modules, .git) | 60-80% |
+| **Log dedup** | Normalize timestamps/UUIDs, count repeats | 70-85% |
+
+Per-command stats shown inline, so you see exactly what was saved:
 
 ```
 [shell] `cargo test` 342 lines → 28 lines, 91.8% filtered
 ```
 
-### Hybrid Inference — Local, Cloud, or Both
+[Filter architecture →](https://bug-ops.github.io/zeph/guide/tools.html)
 
-Run local models via **Ollama** or **Candle** (GGUF with Metal/CUDA acceleration), cloud APIs (**Claude**, **OpenAI**), or any **OpenAI-compatible** endpoint — Together AI, Groq, Fireworks, and more.
+### Two-Tier Context Pruning
 
-The **orchestrator** routes tasks to different providers with automatic fallback chains. The **router** selects models based on prompt content. Use them together for cost-optimized inference that never drops requests.
+When the context window fills up, Zeph doesn't just truncate from the top.
 
-### Skills, Not Hardcoded Prompts
+**Tier 1 — Selective eviction.** Old tool output bodies are cleared from context (persisted to SQLite for recall), keeping message structure intact. No LLM call needed.
+
+**Tier 2 — LLM compaction.** Only when Tier 1 isn't enough, a summarization call compresses older exchanges. A token-based protection zone shields recent messages from pruning.
+
+Result: fewer compaction calls, lower costs, better memory of what happened. [Context engineering →](https://bug-ops.github.io/zeph/guide/context.html)
+
+### Proportional Budget Allocation
+
+Context window space is allocated by purpose, not by arrival order:
+
+| Budget Slice | Allocation | Purpose |
+|-------------|-----------|---------|
+| Recent history | 50% | Current conversation flow |
+| Code context | 30% | Project-relevant code via tree-sitter indexing |
+| Summaries | 8% | Compressed prior exchanges |
+| Semantic recall | 8% | Vector-retrieved relevant memories |
+| Cross-session | 4% | Knowledge transferred from past conversations |
+
+### Prompt Caching
+
+Automatic prompt caching for Anthropic and OpenAI providers. Repeated system prompts and context blocks are served from cache — reducing latency and API costs on every turn after the first.
+
+### Additional Efficiency Measures
+
+- **Tool output truncation** at 30K chars with head+tail split and optional LLM summarization
+- **Doom-loop detection** breaks runaway tool cycles after 3 identical outputs
+- **Parallel context preparation** via `try_join!` — skills, memory, code context fetched concurrently
+- **Byte-length token estimation** — fast approximation without tokenizer overhead
+- **Config hot-reload** — change runtime parameters without restarting the agent
+
+[Token efficiency deep dive →](https://bug-ops.github.io/zeph/architecture/token-efficiency.html)
+
+## Defense-in-Depth Security
+
+Security isn't a feature flag — it's the default. Every layer has its own protection:
+
+```mermaid
+flowchart TD
+    Input[User Input] --> Sandbox
+    Sandbox --> Permissions
+    Permissions --> Confirmation
+    Confirmation --> Execution
+    Execution --> Redaction
+    Redaction --> Output[Safe Output]
+
+    Sandbox[Shell Sandbox<br><i>path restrictions, traversal detection</i>]
+    Permissions[Tool Permissions<br><i>allow / ask / deny per tool pattern</i>]
+    Confirmation[Destructive Command Gate<br><i>rm, drop, truncate require approval</i>]
+    Execution[Sandboxed Execution<br><i>file sandbox, overflow-to-file, rate limiter</i>]
+    Redaction[Secret Redaction<br><i>AWS, OpenAI, Anthropic, Google, GitLab</i>]
+
+    style Sandbox fill:#e74c3c,color:#fff
+    style Permissions fill:#e67e22,color:#fff
+    style Confirmation fill:#f39c12,color:#fff
+    style Execution fill:#27ae60,color:#fff
+    style Redaction fill:#2980b9,color:#fff
+```
+
+| Layer | What It Protects Against |
+|-------|------------------------|
+| **Shell sandbox** | Path traversal, unauthorized directory access |
+| **File sandbox** | Writes outside allowed paths |
+| **Tool permissions** | Glob-based allow/ask/deny policy per tool |
+| **Destructive command gate** | Accidental `rm -rf`, `DROP TABLE`, etc. |
+| **Secret redaction** | API keys leaking into context or logs (6 provider patterns) |
+| **SSRF protection** | Agent and MCP client requests to internal networks |
+| **Audit logging** | Full tool execution trace for forensics |
+| **Rate limiter** | TTL-based eviction, per-IP limits on gateway |
+| **Doom-loop detection** | Runaway tool cycles (3 identical outputs = break) |
+| **Skill trust quarantine** | 4-tier model (Trusted/Verified/Quarantined/Blocked) with blake3 integrity |
+| **Container scanning** | Trivy in CI — 0 HIGH/CRITICAL CVEs |
+
+[Security model →](https://bug-ops.github.io/zeph/security.html) · [MCP security →](https://bug-ops.github.io/zeph/security/mcp.html)
+
+## Lightweight by Design
+
+### No Expensive Hardware Required
+
+Zeph compiles to a **single static binary** (~15 MB). No Python interpreter, no Node.js runtime, no JVM, no container orchestrator. Run it on a $5/month VPS, a Raspberry Pi, or your laptop.
+
+With **Ollama**, you can run local models on consumer hardware — no cloud API needed. With **Candle** (GGUF), run models directly in-process with Metal (macOS) or CUDA (Linux) acceleration.
+
+### Rust, Not Python
+
+| | Zeph | Typical Python Agent |
+|---|---|---|
+| **Startup time** | ~50ms | 2-5s (import torch, langchain, ...) |
+| **Memory at idle** | ~20 MB | 200-500 MB |
+| **Dependencies** | 0 system deps (rustls, no OpenSSL) | Python + pip + venv + system libs |
+| **Deployment** | Copy one binary | Dockerfile + requirements.txt + runtime |
+| **Type safety** | Compile-time (Rust Edition 2024) | Runtime exceptions |
+| **Async** | Native async traits, zero-cost | GIL contention, asyncio quirks |
+
+## Hybrid Inference — Use What You Have
+
+Run local models when you want privacy and zero cost. Use cloud APIs when you need capability. Mix them with the orchestrator for automatic fallback chains.
+
+| Provider | Type | When to Use |
+|----------|------|------------|
+| **Ollama** | Local | Privacy, no API costs, air-gapped environments |
+| **Candle** | Local (in-process) | Embedded inference, Metal/CUDA acceleration |
+| **Claude** | Cloud | Complex reasoning, tool_use |
+| **OpenAI** | Cloud | GPT-4o, function calling, embeddings |
+| **Compatible** | Cloud | Together AI, Groq, Fireworks — any OpenAI-compatible API |
+| **Orchestrator** | Multi-model | Fallback chains across providers |
+| **Router** | Multi-model | Prompt-based model selection |
+
+[OpenAI guide →](https://bug-ops.github.io/zeph/guide/openai.html) · [Candle guide →](https://bug-ops.github.io/zeph/guide/candle.html) · [Orchestrator →](https://bug-ops.github.io/zeph/guide/orchestrator.html)
+
+## Skills, Not Hardcoded Prompts
 
 Capabilities live in `SKILL.md` files — YAML frontmatter + markdown body. Drop a file into `skills/`, and the agent picks it up on the next query via semantic matching. No code changes. No redeployment.
 
-Skills **evolve**: failure detection triggers self-reflection, and the agent generates improved versions — with optional manual approval before activation.
+Skills **evolve**: failure detection triggers self-reflection, and the agent generates improved versions — with optional manual approval before activation. A 4-tier trust model (Trusted → Verified → Quarantined → Blocked) with blake3 integrity hashing ensures that only verified skills execute privileged operations.
 
-### Memory That Persists
+[Self-learning →](https://bug-ops.github.io/zeph/guide/self-learning.html) · [Skill trust →](https://bug-ops.github.io/zeph/guide/skill-trust.html)
 
-SQLite for conversation history. Qdrant for semantic vector search. Hybrid FTS5 + vector retrieval with configurable ranking weights. Cross-session memory transfers knowledge between conversations with relevance filtering.
-
-Two-tier context pruning: selective tool-output eviction before LLM-based compaction — so the agent calls the LLM less and remembers more.
-
-### Built-In TUI Dashboard
-
-A full terminal UI powered by ratatui — not a separate monitoring tool, but an integrated experience:
-
-- Tree-sitter syntax highlighting and markdown rendering
-- Syntax-highlighted diff view for file edits
-- Live metrics: token usage, filter savings, cost tracking
-- Conversation history with message queueing
-- Compact/expanded toggle for tool outputs
-
-```bash
-cargo build --release --features tui
-./target/release/zeph --tui
-```
-
-### Defense-in-Depth Security
-
-Shell sandboxing with path restrictions · file operation sandbox · pattern-based tool permissions (allow/ask/deny) · destructive command confirmation · secret redaction (AWS, OpenAI, Anthropic, Google, GitLab) · SSRF protection (agent + MCP) · audit logging · rate limiting · doom-loop detection · skill trust quarantine with blake3 integrity verification · Trivy-scanned container images with 0 HIGH/CRITICAL CVEs.
-
-### Connect Everything
+## Connect Everything
 
 | Protocol | What It Does |
 |----------|-------------|
@@ -102,7 +206,26 @@ Shell sandboxing with path restrictions · file operation sandbox · pattern-bas
 | **A2A** | Agent-to-agent communication via JSON-RPC 2.0 with SSE streaming |
 | **Channels** | CLI, Telegram, Discord, Slack, TUI — all with streaming support |
 | **Gateway** | HTTP webhook ingestion with bearer auth and rate limiting |
-| **Native tool_use** | Structured tool calling via Claude and OpenAI APIs; text fallback for local models |
+| **Native tool_use** | Structured tool calling via Claude/OpenAI APIs; text fallback for local models |
+
+[MCP →](https://bug-ops.github.io/zeph/guide/mcp.html) · [A2A →](https://bug-ops.github.io/zeph/guide/a2a.html) · [Channels →](https://bug-ops.github.io/zeph/guide/channels.html) · [Gateway →](https://bug-ops.github.io/zeph/guide/gateway.html)
+
+## Built-In TUI Dashboard
+
+A full terminal UI powered by ratatui — not a separate monitoring tool, but an integrated experience:
+
+- Tree-sitter syntax highlighting and markdown rendering
+- Syntax-highlighted diff view for file edits (compact/expanded toggle)
+- Live metrics: token usage, filter savings, cost tracking, confidence distribution
+- Conversation history with message queueing
+- Deferred model warmup with progress indicator
+
+```bash
+cargo build --release --features tui
+./target/release/zeph --tui
+```
+
+[TUI guide →](https://bug-ops.github.io/zeph/guide/tui.html)
 
 ## Architecture
 
@@ -201,6 +324,8 @@ cargo build --release                     # default (always-on features)
 cargo build --release --features full     # everything
 cargo build --release --features tui      # with dashboard
 ```
+
+[Feature flags reference →](https://bug-ops.github.io/zeph/feature-flags.html)
 
 ## Documentation
 
