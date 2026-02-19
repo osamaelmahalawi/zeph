@@ -1,12 +1,14 @@
 use ollama_rs::Ollama;
 
 use crate::error::LlmError;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use ollama_rs::generation::chat::ChatMessage;
 use ollama_rs::generation::chat::request::ChatMessageRequest;
 use ollama_rs::generation::embeddings::request::{EmbeddingsInput, GenerateEmbeddingsRequest};
+use ollama_rs::generation::images::Image as OllamaImage;
 use tokio_stream::StreamExt;
 
-use crate::provider::{ChatStream, LlmProvider, Message, Role};
+use crate::provider::{ChatStream, LlmProvider, Message, MessagePart, Role};
 
 #[derive(Debug)]
 pub struct ModelInfo {
@@ -19,6 +21,7 @@ pub struct OllamaProvider {
     model: String,
     embedding_model: String,
     context_window_size: Option<usize>,
+    vision_model: Option<String>,
 }
 
 impl OllamaProvider {
@@ -30,7 +33,14 @@ impl OllamaProvider {
             model,
             embedding_model,
             context_window_size: None,
+            vision_model: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_vision_model(mut self, model: String) -> Self {
+        self.vision_model = Some(model);
+        self
     }
 
     /// Set context window size (typically from /api/show response).
@@ -101,10 +111,24 @@ impl LlmProvider for OllamaProvider {
         self.context_window_size
     }
 
+    fn supports_vision(&self) -> bool {
+        true
+    }
+
     async fn chat(&self, messages: &[Message]) -> Result<String, LlmError> {
+        let has_images = messages.iter().any(|m| {
+            m.parts
+                .iter()
+                .any(|p| matches!(p, MessagePart::Image { .. }))
+        });
+        let model = if has_images {
+            self.vision_model.as_deref().unwrap_or(&self.model)
+        } else {
+            &self.model
+        };
         let ollama_messages: Vec<ChatMessage> = messages.iter().map(convert_message).collect();
 
-        let request = ChatMessageRequest::new(self.model.clone(), ollama_messages);
+        let request = ChatMessageRequest::new(model.to_owned(), ollama_messages);
 
         let response = self
             .client
@@ -116,8 +140,18 @@ impl LlmProvider for OllamaProvider {
     }
 
     async fn chat_stream(&self, messages: &[Message]) -> Result<ChatStream, LlmError> {
+        let has_images = messages.iter().any(|m| {
+            m.parts
+                .iter()
+                .any(|p| matches!(p, MessagePart::Image { .. }))
+        });
+        let model = if has_images {
+            self.vision_model.as_deref().unwrap_or(&self.model)
+        } else {
+            &self.model
+        };
         let ollama_messages: Vec<ChatMessage> = messages.iter().map(convert_message).collect();
-        let request = ChatMessageRequest::new(self.model.clone(), ollama_messages);
+        let request = ChatMessageRequest::new(model.to_owned(), ollama_messages);
 
         let stream = self
             .client
@@ -166,10 +200,29 @@ impl LlmProvider for OllamaProvider {
 }
 
 fn convert_message(msg: &Message) -> ChatMessage {
+    let images: Vec<OllamaImage> = msg
+        .parts
+        .iter()
+        .filter_map(|p| match p {
+            MessagePart::Image { data, .. } => {
+                Some(OllamaImage::from_base64(STANDARD.encode(data)))
+            }
+            _ => None,
+        })
+        .collect();
+
+    let text = msg.to_llm_content().to_string();
+
     match msg.role {
-        Role::System => ChatMessage::system(msg.to_llm_content().to_string()),
-        Role::User => ChatMessage::user(msg.to_llm_content().to_string()),
-        Role::Assistant => ChatMessage::assistant(msg.to_llm_content().to_string()),
+        Role::System => ChatMessage::system(text),
+        Role::Assistant => ChatMessage::assistant(text),
+        Role::User => {
+            if images.is_empty() {
+                ChatMessage::user(text)
+            } else {
+                ChatMessage::user(text).with_images(images)
+            }
+        }
     }
 }
 
@@ -560,5 +613,86 @@ mod tests {
         assert!(!embedding.is_empty());
         assert!(embedding.len() > 100);
         assert!(embedding.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn with_vision_model_sets_field() {
+        let provider = OllamaProvider::new("http://localhost:11434", "main".into(), "embed".into())
+            .with_vision_model("llava:13b".into());
+        assert_eq!(provider.vision_model.as_deref(), Some("llava:13b"));
+    }
+
+    #[test]
+    fn with_vision_model_builder_returns_self() {
+        let provider = OllamaProvider::new("http://localhost:11434", "main".into(), "embed".into())
+            .with_vision_model("llava:7b".into());
+        assert_eq!(provider.model, "main");
+        assert_eq!(provider.vision_model.as_deref(), Some("llava:7b"));
+    }
+
+    #[test]
+    fn convert_message_text_only_has_no_images() {
+        let msg = Message::from_legacy(Role::User, "hello");
+        let chat_msg = convert_message(&msg);
+        // No images attached — role should be User, content non-empty
+        assert_eq!(
+            chat_msg.role,
+            ollama_rs::generation::chat::MessageRole::User
+        );
+        assert!(!chat_msg.content.is_empty());
+    }
+
+    #[test]
+    fn convert_message_with_image_encodes_base64() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        let data = vec![0xFFu8, 0xD8, 0xFF];
+        let msg = Message::from_parts(
+            Role::User,
+            vec![
+                MessagePart::Text {
+                    text: "describe".into(),
+                },
+                MessagePart::Image {
+                    data: data.clone(),
+                    mime_type: "image/jpeg".into(),
+                },
+            ],
+        );
+        let chat_msg = convert_message(&msg);
+        let images = chat_msg.images.unwrap_or_default();
+        assert_eq!(images.len(), 1);
+        // OllamaImage stores the base64 string internally — verify via Debug/format
+        let img_debug = format!("{:?}", images[0]);
+        assert!(img_debug.contains(&STANDARD.encode(&data)));
+    }
+
+    #[test]
+    fn model_selection_uses_vision_model_when_images_present() {
+        let provider = OllamaProvider::new("http://localhost:11434", "main".into(), "embed".into())
+            .with_vision_model("llava:13b".into());
+
+        let has_images = true;
+        let selected = if has_images {
+            provider.vision_model.as_deref().unwrap_or(&provider.model)
+        } else {
+            &provider.model
+        };
+        assert_eq!(selected, "llava:13b");
+
+        let has_images = false;
+        let selected = if has_images {
+            provider.vision_model.as_deref().unwrap_or(&provider.model)
+        } else {
+            &provider.model
+        };
+        assert_eq!(selected, "main");
+    }
+
+    #[test]
+    fn model_selection_falls_back_to_main_without_vision_model() {
+        let provider = OllamaProvider::new("http://localhost:11434", "main".into(), "embed".into());
+        let selected = provider.vision_model.as_deref().unwrap_or(&provider.model);
+        assert_eq!(selected, "main");
     }
 }

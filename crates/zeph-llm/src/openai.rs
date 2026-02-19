@@ -2,6 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::error::LlmError;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use eventsource_stream::Eventsource;
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
@@ -112,28 +113,44 @@ impl OpenAiProvider {
     }
 
     async fn send_request(&self, messages: &[Message]) -> Result<String, LlmError> {
-        let api_messages = convert_messages(messages);
         let reasoning = self
             .reasoning_effort
             .as_deref()
             .map(|effort| Reasoning { effort });
 
-        let body = ChatRequest {
-            model: &self.model,
-            messages: &api_messages,
-            max_tokens: self.max_tokens,
-            stream: false,
-            reasoning,
+        let response = if has_image_parts(messages) {
+            let vision_messages = convert_messages_vision(messages);
+            let body = VisionChatRequest {
+                model: &self.model,
+                messages: vision_messages,
+                max_tokens: self.max_tokens,
+                stream: false,
+                reasoning,
+            };
+            self.client
+                .post(format!("{}/chat/completions", self.base_url))
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?
+        } else {
+            let api_messages = convert_messages(messages);
+            let body = ChatRequest {
+                model: &self.model,
+                messages: &api_messages,
+                max_tokens: self.max_tokens,
+                stream: false,
+                reasoning,
+            };
+            self.client
+                .post(format!("{}/chat/completions", self.base_url))
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await?
         };
-
-        let response = self
-            .client
-            .post(format!("{}/chat/completions", self.base_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
 
         let status = response.status();
         let text = response.text().await.map_err(LlmError::Http)?;
@@ -365,6 +382,10 @@ impl LlmProvider for OpenAiProvider {
         serde_json::from_str::<T>(content).map_err(|e| LlmError::StructuredParse(e.to_string()))
     }
 
+    fn supports_vision(&self) -> bool {
+        true
+    }
+
     fn supports_tool_use(&self) -> bool {
         true
     }
@@ -463,6 +484,105 @@ impl LlmProvider for OpenAiProvider {
 
         Ok(ChatResponse::Text(choice.message.content))
     }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum OpenAiContentPart {
+    Text { text: String },
+    ImageUrl { image_url: ImageUrlDetail },
+}
+
+#[derive(Serialize)]
+struct ImageUrlDetail {
+    url: String,
+}
+
+#[derive(Serialize)]
+struct VisionApiMessage {
+    role: String,
+    content: Vec<OpenAiContentPart>,
+}
+
+#[derive(Serialize)]
+struct VisionChatRequest<'a> {
+    model: &'a str,
+    messages: Vec<VisionApiMessage>,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning: Option<Reasoning<'a>>,
+}
+
+fn has_image_parts(messages: &[Message]) -> bool {
+    messages.iter().any(|m| {
+        m.parts
+            .iter()
+            .any(|p| matches!(p, MessagePart::Image { .. }))
+    })
+}
+
+fn convert_messages_vision(messages: &[Message]) -> Vec<VisionApiMessage> {
+    messages
+        .iter()
+        .map(|msg| {
+            let role = match msg.role {
+                Role::System => "system",
+                Role::User => "user",
+                Role::Assistant => "assistant",
+            };
+            let has_images = msg
+                .parts
+                .iter()
+                .any(|p| matches!(p, MessagePart::Image { .. }));
+            if has_images {
+                let mut parts = Vec::new();
+                let text_str: String = msg
+                    .parts
+                    .iter()
+                    .filter_map(|p| match p {
+                        MessagePart::Text { text }
+                        | MessagePart::Recall { text }
+                        | MessagePart::CodeContext { text }
+                        | MessagePart::Summary { text }
+                        | MessagePart::CrossSession { text } => Some(text.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                if !text_str.is_empty() {
+                    parts.push(OpenAiContentPart::Text { text: text_str });
+                }
+                for part in &msg.parts {
+                    if let MessagePart::Image { data, mime_type } = part {
+                        let b64 = STANDARD.encode(data);
+                        parts.push(OpenAiContentPart::ImageUrl {
+                            image_url: ImageUrlDetail {
+                                url: format!("data:{mime_type};base64,{b64}"),
+                            },
+                        });
+                    }
+                }
+                if parts.is_empty() {
+                    parts.push(OpenAiContentPart::Text {
+                        text: msg.to_llm_content().to_owned(),
+                    });
+                }
+                VisionApiMessage {
+                    role: role.to_owned(),
+                    content: parts,
+                }
+            } else {
+                VisionApiMessage {
+                    role: role.to_owned(),
+                    content: vec![OpenAiContentPart::Text {
+                        text: msg.to_llm_content().to_owned(),
+                    }],
+                }
+            }
+        })
+        .collect()
 }
 
 fn parse_sse_event(data: &str) -> Option<Result<String, LlmError>> {
@@ -1450,5 +1570,90 @@ mod tests {
         assert!(p.last_cache_usage().is_some());
         let cloned = p.clone();
         assert!(cloned.last_cache_usage().is_none());
+    }
+
+    #[test]
+    fn has_image_parts_detects_image() {
+        let msg_with_image = Message::from_parts(
+            Role::User,
+            vec![
+                MessagePart::Text {
+                    text: "look".into(),
+                },
+                MessagePart::Image {
+                    data: vec![1, 2, 3],
+                    mime_type: "image/png".into(),
+                },
+            ],
+        );
+        let msg_text_only = Message::from_legacy(Role::User, "plain");
+        assert!(has_image_parts(&[msg_with_image]));
+        assert!(!has_image_parts(&[msg_text_only]));
+        assert!(!has_image_parts(&[]));
+    }
+
+    #[test]
+    fn convert_messages_vision_produces_data_uri() {
+        let data = vec![0xFFu8, 0xD8, 0xFF]; // JPEG magic bytes
+        let msg = Message::from_parts(
+            Role::User,
+            vec![
+                MessagePart::Text {
+                    text: "describe this".into(),
+                },
+                MessagePart::Image {
+                    data: data.clone(),
+                    mime_type: "image/jpeg".into(),
+                },
+            ],
+        );
+        let converted = convert_messages_vision(&[msg]);
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].role, "user");
+        // Should have text part + image_url part
+        assert_eq!(converted[0].content.len(), 2);
+        match &converted[0].content[0] {
+            OpenAiContentPart::Text { text } => assert_eq!(text, "describe this"),
+            _ => panic!("expected Text part first"),
+        }
+        match &converted[0].content[1] {
+            OpenAiContentPart::ImageUrl { image_url } => {
+                use base64::{Engine, engine::general_purpose::STANDARD};
+                let expected = format!("data:image/jpeg;base64,{}", STANDARD.encode(&data));
+                assert_eq!(image_url.url, expected);
+            }
+            _ => panic!("expected ImageUrl part second"),
+        }
+    }
+
+    #[test]
+    fn convert_messages_vision_text_only_message() {
+        let msg = Message::from_legacy(Role::System, "system prompt");
+        let converted = convert_messages_vision(&[msg]);
+        assert_eq!(converted.len(), 1);
+        assert_eq!(converted[0].role, "system");
+        assert_eq!(converted[0].content.len(), 1);
+        match &converted[0].content[0] {
+            OpenAiContentPart::Text { text } => assert_eq!(text, "system prompt"),
+            _ => panic!("expected Text part"),
+        }
+    }
+
+    #[test]
+    fn convert_messages_vision_image_only_no_text_part() {
+        let msg = Message::from_parts(
+            Role::User,
+            vec![MessagePart::Image {
+                data: vec![1],
+                mime_type: "image/png".into(),
+            }],
+        );
+        let converted = convert_messages_vision(&[msg]);
+        // No text parts collected → only image_url
+        assert_eq!(converted[0].content.len(), 1);
+        assert!(matches!(
+            &converted[0].content[0],
+            OpenAiContentPart::ImageUrl { .. }
+        ));
     }
 }

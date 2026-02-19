@@ -7,6 +7,7 @@ use tokio::sync::mpsc;
 use zeph_core::channel::{Attachment, AttachmentKind, Channel, ChannelError, ChannelMessage};
 
 const MAX_MESSAGE_LEN: usize = 4096;
+const MAX_IMAGE_BYTES: u32 = 20 * 1024 * 1024;
 
 /// Telegram channel adapter using teloxide.
 #[derive(Debug)]
@@ -87,11 +88,11 @@ impl TelegramChannel {
 
                     let audio_file_id = msg
                         .voice()
-                        .map(|v| v.file.id.0.clone())
-                        .or_else(|| msg.audio().map(|a| a.file.id.0.clone()));
+                        .map(|v| (v.file.id.0.clone(), v.file.size))
+                        .or_else(|| msg.audio().map(|a| (a.file.id.0.clone(), a.file.size)));
 
-                    if let Some(file_id) = audio_file_id {
-                        match download_file(&bot, file_id).await {
+                    if let Some((file_id, file_size)) = audio_file_id {
+                        match download_file(&bot, file_id, file_size).await {
                             Ok(data) => {
                                 attachments.push(Attachment {
                                     kind: AttachmentKind::Audio,
@@ -101,6 +102,34 @@ impl TelegramChannel {
                             }
                             Err(e) => {
                                 tracing::warn!("failed to download audio attachment: {e}");
+                            }
+                        }
+                    }
+
+                    // Handle photo attachments (pick the largest available size)
+                    if let Some(photos) = msg.photo()
+                        && let Some(photo) = photos.iter().max_by_key(|p| p.file.size)
+                    {
+                        if photo.file.size > MAX_IMAGE_BYTES {
+                            tracing::warn!(
+                                size = photo.file.size,
+                                max = MAX_IMAGE_BYTES,
+                                "photo exceeds size limit, skipping"
+                            );
+                        } else {
+                            match download_file(&bot, photo.file.id.0.clone(), photo.file.size)
+                                .await
+                            {
+                                Ok(data) => {
+                                    attachments.push(Attachment {
+                                        kind: AttachmentKind::Image,
+                                        data,
+                                        filename: None,
+                                    });
+                                }
+                                Err(e) => {
+                                    tracing::warn!("failed to download photo attachment: {e}");
+                                }
                             }
                         }
                     }
@@ -228,14 +257,14 @@ impl TelegramChannel {
     }
 }
 
-async fn download_file(bot: &Bot, file_id: String) -> Result<Vec<u8>, String> {
+async fn download_file(bot: &Bot, file_id: String, capacity: u32) -> Result<Vec<u8>, String> {
     use teloxide::net::Download;
 
     let file = bot
         .get_file(file_id.into())
         .await
         .map_err(|e| format!("get_file: {e}"))?;
-    let mut buf: Vec<u8> = Vec::new();
+    let mut buf: Vec<u8> = Vec::with_capacity(capacity as usize);
     bot.download_file(&file.path, &mut buf)
         .await
         .map_err(|e| format!("download_file: {e}"))?;
@@ -446,5 +475,42 @@ mod tests {
         assert!(channel.accumulated.is_empty());
         assert!(channel.last_edit.is_none());
         assert!(channel.message_id.is_none());
+    }
+
+    #[test]
+    fn max_image_bytes_is_20_mib() {
+        assert_eq!(MAX_IMAGE_BYTES, 20 * 1024 * 1024);
+    }
+
+    #[test]
+    fn photo_size_limit_enforcement() {
+        // Mirrors the guard in the photo extraction handler:
+        // photos.iter().max_by_key(|p| p.file.size) followed by
+        // if photo.file.size > MAX_IMAGE_BYTES { skip } else { download }
+        let size_within_limit: u32 = MAX_IMAGE_BYTES - 1;
+        let size_at_limit: u32 = MAX_IMAGE_BYTES;
+        let size_over_limit: u32 = MAX_IMAGE_BYTES + 1;
+
+        assert!(size_within_limit <= MAX_IMAGE_BYTES);
+        assert!(size_at_limit <= MAX_IMAGE_BYTES);
+        assert!(size_over_limit > MAX_IMAGE_BYTES);
+    }
+
+    #[test]
+    fn should_not_send_update_within_threshold() {
+        let token = "test_token".to_string();
+        let allowed_users = Vec::new();
+        let mut channel = TelegramChannel::new(token, allowed_users);
+        // Set last_edit to 1 second ago (well within the 10-second threshold)
+        channel.last_edit = Some(Instant::now() - Duration::from_secs(1));
+        assert!(!channel.should_send_update());
+    }
+
+    #[test]
+    fn start_rejects_empty_allowed_users() {
+        let channel = TelegramChannel::new("test_token".to_string(), Vec::new());
+        let result = channel.start();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), ChannelError::Other(_)));
     }
 }

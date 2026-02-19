@@ -2,6 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use crate::error::LlmError;
+use base64::{Engine, engine::general_purpose::STANDARD};
 use eventsource_stream::Eventsource;
 use serde::{Deserialize, Serialize};
 use tokio_stream::StreamExt;
@@ -90,7 +91,35 @@ impl ClaudeProvider {
         }
     }
 
+    fn has_image_parts(messages: &[Message]) -> bool {
+        messages.iter().any(|m| {
+            m.parts
+                .iter()
+                .any(|p| matches!(p, MessagePart::Image { .. }))
+        })
+    }
+
     fn build_request(&self, messages: &[Message], stream: bool) -> reqwest::RequestBuilder {
+        if Self::has_image_parts(messages) {
+            let (system, chat_messages) = split_messages_structured(messages);
+            let system_blocks = system.map(|s| split_system_into_blocks(&s));
+            let body = VisionRequestBody {
+                model: &self.model,
+                max_tokens: self.max_tokens,
+                system: system_blocks,
+                messages: &chat_messages,
+                stream,
+            };
+            return self
+                .client
+                .post(API_URL)
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", ANTHROPIC_VERSION)
+                .header("anthropic-beta", ANTHROPIC_BETA)
+                .header("content-type", "application/json")
+                .json(&body);
+        }
+
         let (system, chat_messages) = split_messages(messages);
         let system_blocks = system.map(|s| split_system_into_blocks(&s));
 
@@ -145,6 +174,22 @@ impl ClaudeProvider {
                 return Err(LlmError::Other(format!(
                     "Claude API request failed (status {status})"
                 )));
+            }
+
+            if Self::has_image_parts(messages) {
+                let resp: ToolApiResponse = serde_json::from_str(&text)?;
+                if let Some(ref usage) = resp.usage {
+                    log_cache_usage(usage);
+                    self.store_cache_usage(usage);
+                }
+                let extracted = resp.content.into_iter().find_map(|b| {
+                    if let AnthropicContentBlock::Text { text } = b {
+                        Some(text)
+                    } else {
+                        None
+                    }
+                });
+                return extracted.ok_or(LlmError::EmptyResponse { provider: "claude" });
             }
 
             let resp: ApiResponse = serde_json::from_str(&text)?;
@@ -330,6 +375,10 @@ impl LlmProvider for ClaudeProvider {
         Err(LlmError::StructuredParse(
             "no tool_use block in response".into(),
         ))
+    }
+
+    fn supports_vision(&self) -> bool {
+        true
     }
 
     fn supports_tool_use(&self) -> bool {
@@ -648,6 +697,17 @@ enum AnthropicContentBlock {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         is_error: bool,
     },
+    Image {
+        source: ImageSource,
+    },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ImageSource {
+    #[serde(rename = "type")]
+    source_type: String,
+    media_type: String,
+    data: String,
 }
 
 #[derive(Deserialize)]
@@ -667,7 +727,7 @@ fn parse_tool_response(resp: ToolApiResponse) -> ChatResponse {
             AnthropicContentBlock::ToolUse { id, name, input } => {
                 tool_calls.push(ToolUseRequest { id, name, input });
             }
-            AnthropicContentBlock::ToolResult { .. } => {}
+            AnthropicContentBlock::ToolResult { .. } | AnthropicContentBlock::Image { .. } => {}
         }
     }
 
@@ -697,14 +757,16 @@ fn split_messages_structured(messages: &[Message]) -> (Option<String>, Vec<Struc
                 } else {
                     "assistant"
                 };
-                let has_tool_parts = msg.parts.iter().any(|p| {
+                let has_structured_parts = msg.parts.iter().any(|p| {
                     matches!(
                         p,
-                        MessagePart::ToolUse { .. } | MessagePart::ToolResult { .. }
+                        MessagePart::ToolUse { .. }
+                            | MessagePart::ToolResult { .. }
+                            | MessagePart::Image { .. }
                     )
                 });
 
-                if has_tool_parts {
+                if has_structured_parts {
                     let is_assistant = msg.role == Role::Assistant;
                     let mut blocks = Vec::new();
                     for part in &msg.parts {
@@ -753,6 +815,15 @@ fn split_messages_structured(messages: &[Message]) -> (Option<String>, Vec<Struc
                                     text: content.clone(),
                                 });
                             }
+                            MessagePart::Image { data, mime_type } => {
+                                blocks.push(AnthropicContentBlock::Image {
+                                    source: ImageSource {
+                                        source_type: "base64".to_owned(),
+                                        media_type: mime_type.clone(),
+                                        data: STANDARD.encode(data),
+                                    },
+                                });
+                            }
                         }
                     }
                     chat.push(StructuredApiMessage {
@@ -785,6 +856,17 @@ struct RequestBody<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<Vec<SystemContentBlock>>,
     messages: &'a [ApiMessage<'a>],
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
+}
+
+#[derive(Serialize)]
+struct VisionRequestBody<'a> {
+    model: &'a str,
+    max_tokens: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system: Option<Vec<SystemContentBlock>>,
+    messages: &'a [StructuredApiMessage],
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
 }
@@ -1635,5 +1717,76 @@ mod tests {
             Duration::from_secs(BASE_BACKOFF_SECS << 2),
             Duration::from_secs(4)
         );
+    }
+
+    #[test]
+    fn anthropic_content_block_image_serializes_correctly() {
+        let block = AnthropicContentBlock::Image {
+            source: ImageSource {
+                source_type: "base64".to_owned(),
+                media_type: "image/jpeg".to_owned(),
+                data: "abc123".to_owned(),
+            },
+        };
+        let json = serde_json::to_value(&block).unwrap();
+        assert_eq!(json["type"], "image");
+        assert_eq!(json["source"]["type"], "base64");
+        assert_eq!(json["source"]["media_type"], "image/jpeg");
+        assert_eq!(json["source"]["data"], "abc123");
+    }
+
+    #[test]
+    fn split_messages_structured_produces_image_block() {
+        use base64::{Engine, engine::general_purpose::STANDARD};
+
+        let data = vec![0xFFu8, 0xD8, 0xFF];
+        let msg = Message::from_parts(
+            Role::User,
+            vec![
+                MessagePart::Text {
+                    text: "look at this".into(),
+                },
+                MessagePart::Image {
+                    data: data.clone(),
+                    mime_type: "image/jpeg".into(),
+                },
+            ],
+        );
+        let (system, chat) = split_messages_structured(&[msg]);
+        assert!(system.is_none());
+        assert_eq!(chat.len(), 1);
+        assert_eq!(chat[0].role, "user");
+        match &chat[0].content {
+            StructuredContent::Blocks(blocks) => {
+                assert_eq!(blocks.len(), 2);
+                match &blocks[0] {
+                    AnthropicContentBlock::Text { text } => assert_eq!(text, "look at this"),
+                    _ => panic!("expected Text block first"),
+                }
+                match &blocks[1] {
+                    AnthropicContentBlock::Image { source } => {
+                        assert_eq!(source.source_type, "base64");
+                        assert_eq!(source.media_type, "image/jpeg");
+                        assert_eq!(source.data, STANDARD.encode(&data));
+                    }
+                    _ => panic!("expected Image block second"),
+                }
+            }
+            _ => panic!("expected Blocks content"),
+        }
+    }
+
+    #[test]
+    fn has_image_parts_detects_image_in_messages() {
+        let with_image = Message::from_parts(
+            Role::User,
+            vec![MessagePart::Image {
+                data: vec![1],
+                mime_type: "image/png".into(),
+            }],
+        );
+        let without_image = Message::from_legacy(Role::User, "plain text");
+        assert!(ClaudeProvider::has_image_parts(&[with_image]));
+        assert!(!ClaudeProvider::has_image_parts(&[without_image]));
     }
 }
