@@ -492,7 +492,14 @@ async fn main() -> anyhow::Result<()> {
     .with_security(config.security, config.timeouts)
     .with_tool_summarization(config.tools.summarize_output)
     .with_permission_policy(permission_policy.clone())
-    .with_config_reload(config_path, config_reload_rx);
+    .with_config_reload(config_path, config_reload_rx)
+    .with_available_secrets(
+        config
+            .secrets
+            .custom
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
 
     let agent = if config.cost.enabled {
         let tracker = CostTracker::new(true, f64::from(config.cost.max_daily_cents));
@@ -836,6 +843,18 @@ async fn handle_skill_command(
                 result.name,
                 &result.blake3_hash[..8]
             );
+
+            // Warn about required secrets so the user knows to configure them.
+            let skill_md = managed_dir.join(&result.name).join("SKILL.md");
+            if let Ok(meta) = zeph_skills::loader::load_skill_meta(&skill_md)
+                && !meta.requires_secrets.is_empty()
+            {
+                println!(
+                    "  Note: this skill requires secrets: {}",
+                    meta.requires_secrets.join(", ")
+                );
+                println!("  Run `zeph vault set ZEPH_SECRET_<NAME> <value>` for each.");
+            }
         }
 
         SkillCommand::Remove { name } => {
@@ -867,7 +886,17 @@ async fn handle_skill_command(
                     .ok()
                     .flatten()
                     .map_or_else(|| "no trust record".to_owned(), |r| r.trust_level);
-                println!("  {} — {} [{}]", skill.name, skill.description, trust);
+                if skill.requires_secrets.is_empty() {
+                    println!("  {} — {} [{}]", skill.name, skill.description, trust);
+                } else {
+                    println!(
+                        "  {} — {} [{}] (requires: {})",
+                        skill.name,
+                        skill.description,
+                        trust,
+                        skill.requires_secrets.join(", "),
+                    );
+                }
             }
         }
 
@@ -1439,7 +1468,14 @@ async fn run_daemon(
     .with_permission_policy(permission_policy)
     .with_config_reload(config_path_owned, config_reload_rx)
     .with_mcp(mcp_tools, mcp_registry, Some(mcp_manager), &config.mcp)
-    .with_learning(config.skills.learning.clone());
+    .with_learning(config.skills.learning.clone())
+    .with_available_secrets(
+        config
+            .secrets
+            .custom
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
 
     let summary_provider = app.build_summary_provider();
     let agent = if let Some(sp) = summary_provider {
