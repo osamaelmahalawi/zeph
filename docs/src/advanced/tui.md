@@ -29,7 +29,7 @@ When using `--connect`, the TUI renders token-by-token streaming from the remote
 
 ```text
 +-------------------------------------------------------------+
-| Zeph v0.11.2 | Provider: orchestrator | Model: claude-son... |
+| Zeph v0.11.3 | Provider: orchestrator | Model: claude-son... |
 +----------------------------------------+--------------------+
 |                                        | Skills (3/15)      |
 |                                        | - setup-guide      |
@@ -104,7 +104,7 @@ Press `Ctrl+P` in Insert mode to open the command palette. The palette provides 
 
 | Key | Action |
 |-----|--------|
-| Any character | Filter commands by substring match |
+| Any character | Filter commands by fuzzy match |
 | `Up` / `Down` | Navigate the command list |
 | `Enter` | Execute selected command |
 | `Backspace` | Remove last query character |
