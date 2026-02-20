@@ -187,7 +187,16 @@ impl AppBuilder {
     }
 
     pub fn skill_paths(&self) -> Vec<PathBuf> {
-        self.config.skills.paths.iter().map(PathBuf::from).collect()
+        let mut paths: Vec<PathBuf> = self.config.skills.paths.iter().map(PathBuf::from).collect();
+        let managed_dir = managed_skills_dir();
+        if !paths.contains(&managed_dir) {
+            paths.push(managed_dir);
+        }
+        paths
+    }
+
+    pub fn managed_skills_dir() -> PathBuf {
+        managed_skills_dir()
     }
 
     pub async fn build_tool_executor(&self) -> anyhow::Result<ToolExecutorBundle> {
@@ -825,6 +834,11 @@ pub fn build_orchestrator(
         orch_cfg.default.clone(),
         orch_cfg.embed.clone(),
     )?)
+}
+
+/// Returns the default managed skills directory: `~/.config/zeph/skills/`.
+pub fn managed_skills_dir() -> PathBuf {
+    crate::vault::default_vault_dir().join("skills")
 }
 
 pub fn create_mcp_manager(config: &Config) -> zeph_mcp::McpManager {
@@ -1676,6 +1690,55 @@ mod tests {
         let mcp_tools = vec![];
         let registry = create_mcp_registry(&config, &provider, &mcp_tools, "test-model").await;
         assert!(registry.is_none());
+    }
+
+    #[test]
+    fn managed_skills_dir_returns_skills_subdir() {
+        let dir = managed_skills_dir();
+        assert!(
+            dir.ends_with("skills"),
+            "managed_skills_dir should end in 'skills', got: {dir:?}"
+        );
+    }
+
+    #[test]
+    fn app_builder_managed_skills_dir_matches_free_fn() {
+        assert_eq!(AppBuilder::managed_skills_dir(), managed_skills_dir());
+    }
+
+    #[test]
+    fn skill_paths_includes_managed_dir() {
+        let config = Config::load(Path::new("/nonexistent")).unwrap();
+        let builder = AppBuilder {
+            config,
+            config_path: PathBuf::from("/nonexistent/config.toml"),
+            vault: Box::new(EnvVaultProvider),
+        };
+        let paths = builder.skill_paths();
+        let managed = managed_skills_dir();
+        assert!(
+            paths.contains(&managed),
+            "skill_paths() should include managed_skills_dir, got: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn skill_paths_does_not_duplicate_managed_dir() {
+        let managed = managed_skills_dir();
+        let mut config = Config::load(Path::new("/nonexistent")).unwrap();
+        // Pre-add managed dir to skills.paths to test deduplication
+        config.skills.paths = vec![managed.to_string_lossy().into_owned()];
+        let builder = AppBuilder {
+            config,
+            config_path: PathBuf::from("/nonexistent/config.toml"),
+            vault: Box::new(EnvVaultProvider),
+        };
+        let paths = builder.skill_paths();
+        let count = paths.iter().filter(|p| p == &&managed).count();
+        assert_eq!(
+            count, 1,
+            "managed dir should appear exactly once, got: {paths:?}"
+        );
     }
 
     #[tokio::test]
